@@ -1,0 +1,1 @@
+CREATE TABLE private_files(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),owner_id uuid NOT NULL REFERENCES users(id),purpose text NOT NULL CHECK(purpose IN ('csv','evidence')),name text NOT NULL,path text NOT NULL,content_type text NOT NULL,created_at timestamptz NOT NULL DEFAULT now());

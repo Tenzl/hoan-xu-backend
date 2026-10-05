@@ -1,0 +1,267 @@
+{
+  "source": "Shopee Affiliate product offer API and rendered page",
+  "capturedAt": "2026-10-05",
+  "samples": [
+    {
+      "displayedAmounts": [
+        "₫95.000",
+        "2,5% (₫2.375)\t₫2.375",
+        "Shopee Live\t0% (₫0)\t₫0",
+        "Shopee Video\t0% (₫0)\t₫0"
+      ],
+      "data": {
+        "commission": "₫2.375",
+        "commission_rate": {
+          "max_commission_rate": "2,5%",
+          "seller_commission_rate": "0%",
+          "shopee_commission_rate": "2,5%",
+          "seller_commission": "₫0",
+          "shopee_commission": "₫2.375",
+          "commission_cap": "₫40.000"
+        },
+        "batch_item_for_item_card_full": {
+          "name": "Bộ ga gối 3 món phi lụa bo chun, Set ga gối 3 món phi lụa, vải phi lụa thoáng mát, họa tiết đơn sắc trang nhã",
+          "price": "9500000000",
+          "price_min": "9500000000",
+          "price_max": "15900000000"
+        }
+      },
+      "itemId": "25876970260"
+    },
+    {
+      "displayedAmounts": [
+        "₫77.600",
+        "6% (₫4.656)\t2,5% (₫1.940)\t₫6.596",
+        "Shopee Live\t6% (₫4.656)\t0% (₫0)\t₫4.656",
+        "Shopee Video\t6% (₫4.656)\t0% (₫0)\t₫4.656"
+      ],
+      "data": {
+        "commission": "₫6.596",
+        "commission_rate": {
+          "max_commission_rate": "8,5%",
+          "seller_commission_rate": "6%",
+          "shopee_commission_rate": "2,5%",
+          "seller_commission": "₫4.656",
+          "shopee_commission": "₫1.940",
+          "commission_cap": "₫40.000"
+        },
+        "batch_item_for_item_card_full": {
+          "name": "Ga thun lạnh trơn một màu cao cấp không kèm áo gối chất vải mềm mát co giãn ôm nệm đẹp",
+          "price": "7760000000",
+          "price_min": "7760000000",
+          "price_max": "17460000000"
+        }
+      },
+      "itemId": "44378342379"
+    },
+    {
+      "displayedAmounts": [
+        "₫85.261",
+        "2% (₫1.705)\t2,5% (₫2.132)\t₫3.837",
+        "Shopee Live\t2,2% (₫1.876)\t0% (₫0)\t₫1.876",
+        "Shopee Video\t2,2% (₫1.876)\t0% (₫0)\t₫1.876"
+      ],
+      "data": {
+        "commission": "₫3.837",
+        "commission_rate": {
+          "max_commission_rate": "4,5%",
+          "seller_commission_rate": "2%",
+          "shopee_commission_rate": "2,5%",
+          "seller_commission": "₫1.705",
+          "shopee_commission": "₫2.132",
+          "commission_cap": "₫40.000"
+        },
+        "batch_item_for_item_card_full": {
+          "name": "Ga giường Cotton Tici drap trải giường thun lạnh bo chun không kèm vỏ gối mềm mát",
+          "price": "8526100000",
+          "price_min": "8526100000",
+          "price_max": "9700000000"
+        }
+      },
+      "itemId": "25091975938"
+    },
+    {
+      "displayedAmounts": [
+        "₫83.600",
+        "2% (₫1.672)\t2,5% (₫2.090)\t₫3.762",
+        "Shopee Live\t2% (₫1.672)\t0% (₫0)\t₫1.672",
+        "Shopee Video\t2% (₫1.672)\t0% (₫0)\t₫1.672"
+      ],
+      "data": {
+        "commission": "₫3.762",
+        "commission_rate": {
+          "max_commission_rate": "4,5%",
+          "seller_commission_rate": "2%",
+          "shopee_commission_rate": "2,5%",
+          "seller_commission": "₫1.672",
+          "shopee_commission": "₫2.090",
+          "commission_cap": "₫40.000"
+        },
+        "batch_item_for_item_card_full": {
+          "name": "Sét ga gối 3 món coton lụa Tencel 40s  mát mịn vải hàn quốc đủ size thoáng mát hàng cao cấp",
+          "price": "8360000000",
+          "price_min": "8360000000",
+          "price_max": "13600000000"
+        }
+      },
+      "itemId": "29429787328"
+    },
+    {
+      "displayedAmounts": [
+        "₫109.350",
+        "3% (₫3.281)\t2,5% (₫2.734)\t₫6.014",
+        "Shopee Live\t3% (₫3.281)\t0% (₫0)\t₫3.281",
+        "Shopee Video\t3% (₫3.281)\t0% (₫0)\t₫3.281"
+      ],
+      "data": {
+        "commission": "₫6.014",
+        "commission_rate": {
+          "max_commission_rate": "5,5%",
+          "seller_commission_rate": "3%",
+          "shopee_commission_rate": "2,5%",
+          "seller_commission": "₫3.281",
+          "shopee_commission": "₫2.734",
+          "commission_cap": "₫40.000"
+        },
+        "batch_item_for_item_card_full": {
+          "name": "Sét ga gối phi lụa 3 món bo chun bộ ga gối 3 món phi lụa tiêu chuẩn khách sạn, homestay màu đơn sắc trang nhã lịch sự",
+          "price": "10935000000",
+          "price_min": "10935000000",
+          "price_max": "14790000000"
+        }
+      },
+      "itemId": "41011259591"
+    },
+    {
+      "displayedAmounts": [
+        "₫111.920",
+        "2% (₫2.238)\t2,5% (₫2.798)\t₫5.036",
+        "Shopee Live\t2,2% (₫2.462)\t0% (₫0)\t₫2.462",
+        "Shopee Video\t2,2% (₫2.462)\t0% (₫0)\t₫2.462"
+      ],
+      "data": {
+        "commission": "₫5.036",
+        "commission_rate": {
+          "max_commission_rate": "4,5%",
+          "seller_commission_rate": "2%",
+          "shopee_commission_rate": "2,5%",
+          "seller_commission": "₫2.238",
+          "shopee_commission": "₫2.798",
+          "commission_cap": "₫40.000"
+        },
+        "batch_item_for_item_card_full": {
+          "name": "Ga giường thun lạnh hàn quốc drap thun lạnh ý mềm mát không kèm vỏ gối",
+          "price": "11192000000",
+          "price_min": "11192000000",
+          "price_max": "13650000000"
+        }
+      },
+      "itemId": "26681803246"
+    },
+    {
+      "displayedAmounts": [
+        "₫91.540",
+        "2% (₫1.831)\t2,5% (₫2.289)\t₫4.119",
+        "Shopee Live\t2,2% (₫2.014)\t0% (₫0)\t₫2.014",
+        "Shopee Video\t2,2% (₫2.014)\t0% (₫0)\t₫2.014"
+      ],
+      "data": {
+        "commission": "₫4.119",
+        "commission_rate": {
+          "max_commission_rate": "4,5%",
+          "seller_commission_rate": "2%",
+          "shopee_commission_rate": "2,5%",
+          "seller_commission": "₫1.831",
+          "shopee_commission": "₫2.289",
+          "commission_cap": "₫40.000"
+        },
+        "batch_item_for_item_card_full": {
+          "name": "Ga giường Cotton Tici drap trải giường bo chun không kèm vỏ gối mềm mịn cao cấp",
+          "price": "9154000000",
+          "price_min": "9154000000",
+          "price_max": "9700000000"
+        }
+      },
+      "itemId": "24076977619"
+    },
+    {
+      "displayedAmounts": [
+        "₫100.000",
+        "5% (₫5.000)\t2,5% (₫2.500)\t₫7.500",
+        "Shopee Live\t5% (₫5.000)\t0% (₫0)\t₫5.000",
+        "Shopee Video\t5% (₫5.000)\t0% (₫0)\t₫5.000"
+      ],
+      "data": {
+        "commission": "₫7.500",
+        "commission_rate": {
+          "max_commission_rate": "7,5%",
+          "seller_commission_rate": "5%",
+          "shopee_commission_rate": "2,5%",
+          "seller_commission": "₫5.000",
+          "shopee_commission": "₫2.500",
+          "commission_cap": "₫40.000"
+        },
+        "batch_item_for_item_card_full": {
+          "name": "Ga/drap lẻ thun lạnh Hàn Quốc 1 màu đủ size ( 3cm 5cm 10cm 15cm )",
+          "price": "10000000000",
+          "price_min": "10000000000",
+          "price_max": "23300000000"
+        }
+      },
+      "itemId": "22385393424"
+    },
+    {
+      "displayedAmounts": [
+        "₫83.700",
+        "2% (₫1.674)\t2,5% (₫2.093)\t₫3.767",
+        "Shopee Live\t2% (₫1.674)\t0% (₫0)\t₫1.674",
+        "Shopee Video\t2% (₫1.674)\t0% (₫0)\t₫1.674"
+      ],
+      "data": {
+        "commission": "₫3.767",
+        "commission_rate": {
+          "max_commission_rate": "4,5%",
+          "seller_commission_rate": "2%",
+          "shopee_commission_rate": "2,5%",
+          "seller_commission": "₫1.674",
+          "shopee_commission": "₫2.093",
+          "commission_cap": "₫40.000"
+        },
+        "batch_item_for_item_card_full": {
+          "name": "Ga giường Cotton Tici drap trải giường bo chun không kèm vỏ gối mềm mịn không phai màu",
+          "price": "8370000000",
+          "price_min": "8370000000",
+          "price_max": "9700000000"
+        }
+      },
+      "itemId": "16799200324"
+    },
+    {
+      "displayedAmounts": [
+        "₫78.000",
+        "2% (₫1.560)\t2,5% (₫1.950)\t₫3.510",
+        "Shopee Live\t2% (₫1.560)\t0% (₫0)\t₫1.560",
+        "Shopee Video\t2% (₫1.560)\t0% (₫0)\t₫1.560"
+      ],
+      "data": {
+        "commission": "₫3.510",
+        "commission_rate": {
+          "max_commission_rate": "4,5%",
+          "seller_commission_rate": "2%",
+          "shopee_commission_rate": "2,5%",
+          "seller_commission": "₫1.560",
+          "shopee_commission": "₫1.950",
+          "commission_cap": "₫40.000"
+        },
+        "batch_item_for_item_card_full": {
+          "name": "Ga giường cotton tici Drap trải giường kích thước 1m6,1m8,2m2",
+          "price": "7800000000",
+          "price_min": "7800000000",
+          "price_max": "11600000000"
+        }
+      },
+      "itemId": "21876698603"
+    }
+  ],
+  "priceScale": 100000
+}

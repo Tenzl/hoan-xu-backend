@@ -1,0 +1,2 @@
+channel,publisher,order_id,line_id,tracking_code,date,product_name,value,commission,status
+shopee,YOUR_PUBLISHER,ORDER001,LINE001,REPLACE_WITH_REAL_TRACKING,2026-10-05,Sản phẩm ví dụ,500000,50000,approved

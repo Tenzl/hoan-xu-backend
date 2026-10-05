@@ -1,0 +1,55 @@
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE TABLE users (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text NOT NULL, email text NOT NULL DEFAULT '',
+ role text NOT NULL CHECK(role IN ('customer','staff','admin')), blocked boolean NOT NULL DEFAULT false,
+ tracking_code text NOT NULL UNIQUE DEFAULT encode(gen_random_bytes(10),'hex'), created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE auth_identities (subject text PRIMARY KEY, user_id uuid NOT NULL UNIQUE REFERENCES users(id));
+CREATE TABLE internal_credentials (user_id uuid PRIMARY KEY REFERENCES users(id), username text NOT NULL UNIQUE, password_hash text NOT NULL, must_change boolean NOT NULL DEFAULT true);
+CREATE TABLE user_permissions (user_id uuid REFERENCES users(id), permission text NOT NULL CHECK(permission IN ('orders','withdrawals','users','gifts','community','notifications','settings','audit')), PRIMARY KEY(user_id,permission));
+CREATE TABLE sessions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES users(id), token_hash text NOT NULL UNIQUE, csrf_hash text NOT NULL, csrf_token text NOT NULL, reauthenticated_at timestamptz, created_at timestamptz NOT NULL DEFAULT now(), expires_at timestamptz NOT NULL);
+CREATE INDEX ON sessions(user_id);
+CREATE TABLE oauth_requests (state_hash text PRIMARY KEY, nonce text NOT NULL, verifier text NOT NULL, expires_at timestamptz NOT NULL);
+CREATE TABLE cashback_policies (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), share_percent numeric(5,2) NOT NULL CHECK(share_percent BETWEEN 0 AND 100), created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE reward_policies (id text PRIMARY KEY, settings jsonb NOT NULL);
+CREATE TABLE app_settings (id boolean PRIMARY KEY DEFAULT true CHECK(id), settings jsonb NOT NULL);
+CREATE TABLE affiliate_channels (id text PRIMARY KEY CHECK(id IN ('shopee','lazada','tiktok','tiki')), name text NOT NULL, status text NOT NULL CHECK(status IN ('demo','not_configured','available','temporarily_unavailable')), settings jsonb NOT NULL DEFAULT '{}');
+CREATE TABLE affiliate_links (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES users(id), channel text NOT NULL REFERENCES affiliate_channels(id), original_url text NOT NULL, affiliate_url text NOT NULL, tracking_code text NOT NULL UNIQUE, policy_id uuid NOT NULL REFERENCES cashback_policies(id), item_id text, saved boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX ON affiliate_links(user_id,created_at DESC,id DESC);
+CREATE TABLE product_checks (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid REFERENCES users(id), item_id text NOT NULL, shop_id text NOT NULL, result jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE orders (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES users(id), link_id uuid REFERENCES affiliate_links(id), policy_id uuid NOT NULL REFERENCES cashback_policies(id), channel text NOT NULL REFERENCES affiliate_channels(id), publisher text NOT NULL, external_id text NOT NULL, line_id text NOT NULL, product_name text NOT NULL, value bigint NOT NULL CHECK(value>=0), commission bigint NOT NULL CHECK(commission>=0), cashback bigint NOT NULL CHECK(cashback>=0), status text NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')), ordered_at timestamptz NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(channel,publisher,external_id,line_id));
+CREATE INDEX ON orders(user_id,status,ordered_at DESC,id DESC);
+CREATE TABLE order_items (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), order_id uuid NOT NULL REFERENCES orders(id), item_id text, quantity integer NOT NULL DEFAULT 1 CHECK(quantity>0));
+CREATE TABLE order_events (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), order_id uuid NOT NULL REFERENCES orders(id), actor_id uuid REFERENCES users(id), action text NOT NULL, reason text NOT NULL DEFAULT '', payload jsonb NOT NULL DEFAULT '{}', created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE wallet_accounts (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid REFERENCES users(id), kind text NOT NULL CHECK(kind IN ('available','held','debt','system')), balance bigint NOT NULL DEFAULT 0, CHECK(kind='system' OR balance>=0), UNIQUE(user_id,kind));
+CREATE UNIQUE INDEX one_system_account ON wallet_accounts(kind) WHERE kind='system';
+CREATE TABLE wallet_transactions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), reference text NOT NULL UNIQUE, description text NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE wallet_entries (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), transaction_id uuid NOT NULL REFERENCES wallet_transactions(id), account_id uuid NOT NULL REFERENCES wallet_accounts(id), amount bigint NOT NULL CHECK(amount<>0));
+CREATE INDEX ON wallet_entries(account_id,transaction_id);
+CREATE FUNCTION prevent_ledger_mutation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Ledger is immutable'; END $$;
+CREATE TRIGGER immutable_entries BEFORE UPDATE OR DELETE ON wallet_entries FOR EACH ROW EXECUTE FUNCTION prevent_ledger_mutation();
+CREATE TRIGGER immutable_transactions BEFORE UPDATE OR DELETE ON wallet_transactions FOR EACH ROW EXECUTE FUNCTION prevent_ledger_mutation();
+CREATE FUNCTION check_balanced_transaction() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF (SELECT coalesce(sum(amount),0) FROM wallet_entries WHERE transaction_id=NEW.transaction_id) <> 0 THEN RAISE EXCEPTION 'Unbalanced ledger'; END IF; RETURN NEW; END $$;
+CREATE CONSTRAINT TRIGGER balanced_entries AFTER INSERT ON wallet_entries DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION check_balanced_transaction();
+CREATE TABLE withdrawals (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES users(id), amount bigint NOT NULL CHECK(amount>=50000 AND amount%1000=0), bank text NOT NULL, bank_details text NOT NULL, status text NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','processing','paid','rejected')), processor_id uuid REFERENCES users(id), bank_reference text, evidence_path text, reason text NOT NULL DEFAULT '', created_at timestamptz NOT NULL DEFAULT now());
+CREATE UNIQUE INDEX ON withdrawals(bank_reference) WHERE bank_reference IS NOT NULL;
+CREATE INDEX ON withdrawals(user_id,status,created_at DESC);
+CREATE TABLE coin_accounts (user_id uuid PRIMARY KEY REFERENCES users(id), balance bigint NOT NULL DEFAULT 0 CHECK(balance>=0), streak integer NOT NULL DEFAULT 0, best integer NOT NULL DEFAULT 0, last_day date);
+CREATE TABLE coin_transactions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES users(id), reference text NOT NULL UNIQUE, amount bigint NOT NULL CHECK(amount<>0), description text NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
+CREATE TRIGGER immutable_coins BEFORE UPDATE OR DELETE ON coin_transactions FOR EACH ROW EXECUTE FUNCTION prevent_ledger_mutation();
+CREATE TABLE checkins (user_id uuid REFERENCES users(id), day date NOT NULL, streak integer NOT NULL, award integer NOT NULL, PRIMARY KEY(user_id,day));
+CREATE TABLE gift_catalog (id text PRIMARY KEY, name text NOT NULL, channel text NOT NULL REFERENCES affiliate_channels(id), cost bigint NOT NULL CHECK(cost>0), stock integer NOT NULL DEFAULT 0 CHECK(stock>=0), active boolean NOT NULL DEFAULT true);
+CREATE TABLE gift_redemptions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES users(id), gift_id text NOT NULL REFERENCES gift_catalog(id), cost bigint NOT NULL CHECK(cost>0), status text NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','completed','rejected')), voucher_cipher text, reason text NOT NULL DEFAULT '', created_at timestamptz NOT NULL DEFAULT now());
+CREATE UNIQUE INDEX ON gift_redemptions(user_id,gift_id) WHERE status IN ('pending','completed');
+CREATE TABLE deals (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES users(id), channel text NOT NULL REFERENCES affiliate_channels(id), body text NOT NULL CHECK(length(body) BETWEEN 1 AND 400), hidden boolean NOT NULL DEFAULT false, deleted boolean NOT NULL DEFAULT false, reason text NOT NULL DEFAULT '', created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE deal_likes (deal_id uuid REFERENCES deals(id), user_id uuid REFERENCES users(id), PRIMARY KEY(deal_id,user_id));
+CREATE TABLE notifications (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), recipient_id uuid REFERENCES users(id), title text NOT NULL CHECK(length(title) BETWEEN 1 AND 80), body text NOT NULL CHECK(length(body) BETWEEN 1 AND 1000), deleted boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE notification_receipts (notification_id uuid REFERENCES notifications(id), user_id uuid REFERENCES users(id), read_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(notification_id,user_id));
+CREATE TABLE import_batches (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), actor_id uuid NOT NULL REFERENCES users(id), filename text NOT NULL, file_hash text NOT NULL, mapping jsonb NOT NULL, status text NOT NULL DEFAULT 'preview' CHECK(status IN ('preview','queued','processing','completed','failed')), lease_until timestamptz, attempts integer NOT NULL DEFAULT 0, error text, created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE import_rows (batch_id uuid REFERENCES import_batches(id), row_number integer NOT NULL, payload jsonb NOT NULL, status text NOT NULL CHECK(status IN ('valid','invalid','unmatched','applied','duplicate','adjustment')), error text, PRIMARY KEY(batch_id,row_number));
+CREATE TABLE outbox_events (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), kind text NOT NULL, payload jsonb NOT NULL, status text NOT NULL DEFAULT 'pending', lease_until timestamptz, created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE audit_logs (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), actor_id uuid REFERENCES users(id), action text NOT NULL, resource text NOT NULL, payload jsonb NOT NULL DEFAULT '{}', created_at timestamptz NOT NULL DEFAULT now());
+CREATE TRIGGER immutable_audit BEFORE UPDATE OR DELETE ON audit_logs FOR EACH ROW EXECUTE FUNCTION prevent_ledger_mutation();
+CREATE TABLE idempotency_records (user_id uuid REFERENCES users(id), key text NOT NULL, operation text NOT NULL, payload_hash text NOT NULL, response jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(user_id,key));
+CREATE TABLE rate_limit_buckets (key text NOT NULL, window_id bigint NOT NULL, count integer NOT NULL, expires_at timestamptz NOT NULL, PRIMARY KEY(key,window_id));
+CREATE INDEX ON rate_limit_buckets(expires_at);

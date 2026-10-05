@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+.diagnostics/
+.tools/
+private-data/
+chrome-profile/
+bin/
+coverage/
+*.exe
+*.log
+*.enc
+*.pem
+*.key
+*.dump
+*.backup
