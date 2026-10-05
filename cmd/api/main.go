@@ -50,7 +50,7 @@ func run() error {
 	if e != nil {
 		slog.Warn("google_unavailable", "error", e)
 	}
-	profile, e := filepath.Abs(env("CHROME_PROFILE", "../private-data/chrome-profile"))
+	profile, e := filepath.Abs(env("CHROME_PROFILE", "private-data/chrome-profile"))
 	if e != nil {
 		return e
 	}
@@ -59,7 +59,7 @@ func run() error {
 	go b.Run(ctx)
 	scale, _ := strconv.ParseInt(os.Getenv("SHOPEE_PRICE_SCALE"), 10, 64)
 	aff := &affiliate.Service{Store: store, Browser: b, Enabled: enabled, TrackingVerified: os.Getenv("SHOPEE_TRACKING_VERIFIED") == "true", Publisher: os.Getenv("SHOPEE_PUBLISHER"), SchemaVerified: os.Getenv("SHOPEE_SCHEMA_VERIFIED") == "true", PriceScale: scale}
-	private, e := filepath.Abs(env("PRIVATE_DIR", "../private-data/files"))
+	private, e := filepath.Abs(env("PRIVATE_DIR", "private-data/files"))
 	if e != nil {
 		return e
 	}
