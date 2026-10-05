@@ -8,6 +8,8 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /readyz
+    # Cookies persist in PostgreSQL. This disk also preserves profile/uploads.
+    # For a new service, omit this block if only cookies need to persist.
     disk:
       name: hoan-xu-private-data
       mountPath: /var/data

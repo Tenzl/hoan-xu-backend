@@ -128,7 +128,7 @@ func (m *Manager) start(ctx context.Context) error {
 	m.authenticated = false
 	m.state = "checking"
 	if m.cookies != nil {
-		cookies, e := m.cookies.Load()
+		cookies, e := m.cookies.LoadContext(ctx)
 		if e != nil {
 			m.state = "cookie_storage_error"
 		} else if len(cookies) > 0 {
@@ -330,7 +330,7 @@ func (m *Manager) saveSessionCookies(ctx context.Context) error {
 	if _, err = ParseCookies(string(raw)); err != nil {
 		return errors.New("COOKIE_STORAGE_FAILED")
 	}
-	return m.cookies.Save(string(raw))
+	return m.cookies.SaveContext(ctx, string(raw))
 }
 func (m *Manager) RefreshSession(ctx context.Context) map[string]any {
 	m.mu.Lock()
@@ -386,7 +386,10 @@ func (m *Manager) PasteCookies(ctx context.Context, raw string) (map[string]any,
 	m.authenticated = false
 	m.state = "checking"
 	m.mu.Unlock()
-	if e = m.cookies.Save(strings.TrimSpace(raw)); e != nil {
+	if e = m.cookies.SaveContext(ctx, strings.TrimSpace(raw)); e != nil {
+		m.mu.Lock()
+		m.state = "cookie_storage_error"
+		m.mu.Unlock()
 		return nil, e
 	}
 	m.probeSession(ctx)

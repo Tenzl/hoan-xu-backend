@@ -67,6 +67,7 @@ doc.paths['/admin/browser/session-checks'].post.responses['201'].content={'appli
 for(const p of ['/admin/browser/cookies','/admin/browser/session-checks']){
  const op=doc.paths[p][p.endsWith('/cookies')?'put':'post'];
  op.description='Requires admin or staff settings permission. Returns metadata only. The managed Chromium process and current cookies are reused while it remains alive.';
+ if(p.endsWith('/cookies'))op.description+=' Validated cookies are encrypted in the backend database and restored when Chromium starts; cookie values are never returned.';
  for(const code of ['401','403','429'])op.responses[code]={description:code==='401'?'Session required':code==='403'?'Settings permission and CSRF validation required':'Per-user request limit reached'};
 }
 const status=choice('pending','approved','rejected');

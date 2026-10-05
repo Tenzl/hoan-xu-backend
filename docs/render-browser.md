@@ -13,17 +13,21 @@ Vercel; PostgreSQL tiếp tục dùng Supabase. Không cần worker hoặc lapto
 2. Dùng một instance. Cấu hình mẫu `render.yaml` dùng **1 CPU / 2 GB RAM**
    (`1c-2g`) cho Go và Chrome; đây là cấu hình trả phí, cần xem giá trên Render
    trước khi áp dụng. RAM 512 MB có thể không đủ cho Chrome và API chạy cùng nhau.
-3. Thêm persistent disk 5 GB, mount `/var/data` để giữ profile Chrome, cookie mã hóa
-   và file riêng. Disk chỉ gắn vào một instance; không bật autoscaling.
+3. Cookie được lưu mã hóa trong PostgreSQL, không cần persistent disk để giữ
+   cookie qua restart. Nếu muốn giữ cả profile Chrome và file upload riêng,
+   thêm disk 5 GB, mount `/var/data`. Disk là tùy chọn trả phí và chỉ gắn vào
+   một instance. Cấu hình mẫu `render.yaml` vẫn giữ disk cho profile và upload;
+   có thể bỏ khối `disk` trước khi tạo service mới nếu chỉ cần lưu cookie.
 4. Import các giá trị trong `env.prod` vào Render Environment. File này được git
    ignore và không nằm trong Docker image. Giữ nguyên `DATA_ENCRYPTION_KEY` qua
    các lần deploy. Không tạo lại khóa khi đã có dữ liệu mã hóa.
 5. Health check `/readyz`. Public port dùng biến `PORT` của Render (mặc định 10000).
    Chỉ API bind `0.0.0.0`; không mở các port 5900, 6080 hoặc Chrome debugging.
-6. Nếu database chưa có schema, chạy `/app/admin migrate` bằng kết nối migration
-   trong môi trường có đủ quyền, trước khi đưa API mới vào sử dụng. Không chạy
-   migration tự động mỗi lần container khởi động. Database Supabase hiện tại
-   đã được chuẩn bị; không cần tạo database mới.
+6. Chạy `/app/admin migrate` bằng kết nối migration có đủ quyền trước khi đưa
+   API mới vào sử dụng. Cookie database yêu cầu migration 10 tạo bảng
+   `browser_credentials` với RLS và thu hồi quyền của Supabase Data API.
+   Có thể chạy `go run ./cmd/admin migrate` tại máy có cấu hình database đó.
+   Không chạy migration tự động mỗi lần container khởi động.
 
 Các biến dành cho container:
 
@@ -52,10 +56,17 @@ Nếu dùng custom domain backend, đổi `REMOTE_BROWSER_ORIGIN` theo domain m�
    Shopee yêu cầu. Đây chính là Chrome mà API dùng để kiểm tra sản phẩm.
 4. Quay lại trang quản trị, chọn **Kiểm tra phiên hiện có**. Không cần xuất cookie
    từ Chrome cá nhân nếu đăng nhập trực tiếp trên server. Khi phiên hợp lệ,
-   backend tự lưu cookie hiện tại dưới dạng mã hóa tại
-   `/var/data/shopee-cookies.enc`; những lần kiểm tra định kỳ cũng cập nhật file
-   này. Mỗi lần Chrome mới khởi động sau restart sẽ đọc và áp dụng cookie đã lưu.
-5. Đóng phiên điều khiển khi xong. Profile vẫn lưu trên disk; Chrome vẫn chạy.
+   backend tự mã hóa cookie hiện tại và lưu vào bảng `browser_credentials`.
+   Những lần kiểm tra định kỳ cũng cập nhật cookie trong database. Mỗi lần
+   Chrome mới khởi động sau restart sẽ đọc và áp dụng cookie đã lưu từ database.
+5. Đóng phiên điều khiển khi xong. Chrome vẫn chạy; profile chỉ tồn tại qua
+   restart nếu có disk. Cookie trong database không phụ thuộc vào profile.
+
+Cookie cũ trong `shopee-cookies.enc` được import khi database chưa có cookie;
+database luôn được ưu tiên nếu đã có dữ liệu. Để chuyển cookie trên máy local
+sang database trước khi deploy, chạy `go run ./cmd/admin shopee-cookie-import`
+với đúng `DATABASE_URL`, `DATA_ENCRYPTION_KEY` và `CHROME_PROFILE`. Không in cookie
+ra terminal hoặc nhập trực tiếp cookie dạng rõ vào Supabase SQL Editor.
 
 `SHOPEE_ENABLED=false` ban đầu không ngăn admin mở Chrome để đăng nhập. Chỉ bật
 kiểm tra sản phẩm sau khi xác minh phiên hoạt động. `SHOPEE_TRACKING_VERIFIED` và
@@ -64,8 +75,10 @@ Không bật tracking chỉ vì đăng nhập thành công.
 
 Shopee vẫn có thể yêu cầu xác minh lại hoặc từ chối IP của Render. Chạy có giao
 diện không bảo đảm hết kiểm tra; giao diện từ xa giúp xử lý thủ công khi sàn cho
-phép. Container restart làm mất vé/phiên điều khiển, nhưng dữ liệu trên disk còn.
-Disk khiến deploy cần dừng instance cũ trước khi instance mới chạy; có gián đoạn
+phép. Cookie lưu trong database không bảo đảm Shopee sẽ chấp nhận một profile
+mới. Container restart làm mất vé/phiên điều khiển, nhưng cookie trong database
+và dữ liệu trên disk (nếu có) còn. Disk khiến deploy cần dừng instance cũ trước khi
+instance mới chạy; có gián đoạn
 ngắn và kết nối màn hình đang mở sẽ bị ngắt.
 
 ## Bảo vệ màn hình và vận hành

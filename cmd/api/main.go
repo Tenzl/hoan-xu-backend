@@ -57,7 +57,11 @@ func run() error {
 		return e
 	}
 	enabled := os.Getenv("SHOPEE_ENABLED") == "true"
-	b := browser.NewManaged(os.Getenv("CHROME_PATH"), profile, &browser.CookieStore{Path: filepath.Join(filepath.Dir(profile), "shopee-cookies.enc"), Codec: store}, enabled, browser.WithHeadless(env("CHROME_HEADLESS", "true") != "false"))
+	cookieStore, e := browser.NewDatabaseCookieStore(ctx, pool, store, filepath.Join(filepath.Dir(profile), "shopee-cookies.enc"))
+	if e != nil {
+		return fmt.Errorf("Shopee cookie storage unavailable; check database migrations and DATA_ENCRYPTION_KEY")
+	}
+	b := browser.NewManaged(os.Getenv("CHROME_PATH"), profile, cookieStore, enabled, browser.WithHeadless(env("CHROME_HEADLESS", "true") != "false"))
 	go b.Run(ctx)
 	scale, _ := strconv.ParseInt(os.Getenv("SHOPEE_PRICE_SCALE"), 10, 64)
 	aff := &affiliate.Service{Store: store, Browser: b, Enabled: enabled, TrackingVerified: os.Getenv("SHOPEE_TRACKING_VERIFIED") == "true", Publisher: os.Getenv("SHOPEE_PUBLISHER"), SchemaVerified: os.Getenv("SHOPEE_SCHEMA_VERIFIED") == "true", PriceScale: scale}

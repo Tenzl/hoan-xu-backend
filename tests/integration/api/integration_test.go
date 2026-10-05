@@ -227,7 +227,7 @@ func testStoreWithTiers(t *testing.T, tiers bool) (*platform.Store, string, stri
 		_, _ = base.Exec(context.Background(), `DROP SCHEMA `+pgx.Identifier{schema}.Sanitize()+` CASCADE`)
 		base.Close()
 	})
-	for _, name := range []string{"000001_initial.up.sql", "000002_defaults.up.sql", "000003_private_files.up.sql", "000004_order_source.up.sql", "000005_support_faq.up.sql", "000006_user_bank.up.sql", "000007_order_approval_time.up.sql", "000008_cashback_tiers.up.sql", "000009_unified_wallet.up.sql"} {
+	for _, name := range []string{"000001_initial.up.sql", "000002_defaults.up.sql", "000003_private_files.up.sql", "000004_order_source.up.sql", "000005_support_faq.up.sql", "000006_user_bank.up.sql", "000007_order_approval_time.up.sql", "000008_cashback_tiers.up.sql", "000009_unified_wallet.up.sql", "000010_browser_credentials.up.sql"} {
 		if !tiers && (name == "000008_cashback_tiers.up.sql" || name == "000009_unified_wallet.up.sql") {
 			continue
 		}

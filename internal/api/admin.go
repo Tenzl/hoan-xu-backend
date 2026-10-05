@@ -590,6 +590,9 @@ func (s *Server) pasteShopeeCookies(w http.ResponseWriter, r *http.Request) {
 	status, e := s.Affiliate.Browser.PasteCookies(ctx, p.Cookie)
 	if e != nil {
 		code, message := "BROWSER_UNAVAILABLE", "Không áp dụng được cookie. Kiểm tra Chromium và thử lại."
+		if errors.Is(e, browser.ErrCookieStorage) {
+			code, message = "SHOPEE_COOKIE_STORAGE_ERROR", "Không lưu được cookie Shopee vào database. Kiểm tra kết nối và khóa mã hóa."
+		}
 		if errors.Is(e, context.DeadlineExceeded) || errors.Is(e, context.Canceled) {
 			code = "BROWSER_TIMEOUT"
 		}

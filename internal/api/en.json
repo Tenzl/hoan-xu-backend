@@ -719,5 +719,7 @@
   "Địa chỉ Chrome từ xa không hợp lệ.": "Invalid remote Chrome address.",
   "Cho phép mở cửa sổ mới để dùng Chrome trên server.": "Allow popups to use Chrome on the server.",
   "Xác nhận mật khẩu quản trị": "Confirm administrator password",
-  "Chỉ quản trị viên được mở Chrome trên server.": "Only administrators can open Chrome on the server."
+  "Chỉ quản trị viên được mở Chrome trên server.": "Only administrators can open Chrome on the server.",
+  "Cookie được lưu mã hóa trong database và tự nạp khi backend khởi động lại.": "Cookies are encrypted in the database and loaded automatically when the backend restarts.",
+  "Không lưu được cookie Shopee vào database. Kiểm tra kết nối và khóa mã hóa.": "Could not save Shopee cookies to the database. Check the connection and encryption key."
 }
