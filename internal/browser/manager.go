@@ -29,6 +29,7 @@ type Manager struct {
 	lifetime        context.Context
 	autoStart       bool
 	headless        bool
+	manualLogin     bool
 	cookies         *CookieStore
 	version         uint64
 	starts          int
@@ -70,6 +71,18 @@ func NewManaged(path, profile string, cookies *CookieStore, enabled bool, option
 	}
 	return m
 }
+
+// Manual mode waits for the administrator to open Chrome. It never imports or
+// exports cookies; authentication belongs to the normal Chrome profile.
+func NewManual(path, profile string, options ...Option) *Manager {
+	m := NewManaged(path, profile, nil, false, WithHeadless(false))
+	m.manualLogin = true
+	for _, option := range options {
+		option(m)
+	}
+	return m
+}
+func (m *Manager) UsesManualLogin() bool   { return m.manualLogin }
 func (m *Manager) CookiesConfigured() bool { return m.cookies.Configured() }
 func (m *Manager) SessionVersion() uint64  { m.mu.Lock(); defer m.mu.Unlock(); return m.version }
 
@@ -125,6 +138,9 @@ func (m *Manager) start(ctx context.Context) error {
 	m.cancel = rc
 	m.allocatorCancel = ac
 	m.starts++
+	if m.manualLogin {
+		m.version++
+	}
 	m.authenticated = false
 	m.state = "checking"
 	if m.cookies != nil {
@@ -281,7 +297,11 @@ func (m *Manager) probeSession(ctx context.Context) {
 		cookieSaveError = m.saveSessionCookies(tab)
 	}
 	m.mu.Lock()
+	wasAuthenticated := m.authenticated
 	m.authenticated = e == nil && state == "authenticated"
+	if m.manualLogin && m.authenticated && !wasAuthenticated {
+		m.version++
+	}
 	now := time.Now().UTC()
 	m.lastVerified = &now
 	if state == "verification_required" {
@@ -335,6 +355,12 @@ func (m *Manager) saveSessionCookies(ctx context.Context) error {
 func (m *Manager) RefreshSession(ctx context.Context) map[string]any {
 	m.mu.Lock()
 	life := m.lifetime
+	if m.manualLogin && !m.running() {
+		m.authenticated = false
+		m.state = "login_required"
+		m.mu.Unlock()
+		return m.Status()
+	}
 	m.mu.Unlock()
 	// Browser lifetime is independent of the HTTP request which triggers the probe.
 	m.sessionMu.RLock()
@@ -350,6 +376,9 @@ func (m *Manager) RefreshSession(ctx context.Context) map[string]any {
 	return m.Status()
 }
 func (m *Manager) PasteCookies(ctx context.Context, raw string) (map[string]any, error) {
+	if m.manualLogin {
+		return nil, errors.New("COOKIE_IMPORT_REMOVED")
+	}
 	cookies, e := ParseCookies(raw)
 	if e != nil {
 		return nil, e

@@ -3,11 +3,9 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"hoanxu/internal/auth"
-	"hoanxu/internal/browser"
 	"hoanxu/internal/cashback"
 	"hoanxu/internal/community"
 	"hoanxu/internal/imports"
@@ -256,7 +254,7 @@ func (s *Server) adminRoutes(r chi.Router) {
 			s.reply(w, r, 0, nil, platform.Fail(409, "DEMO_ONLY", "Kênh này vẫn giữ mẫu."))
 			return
 		}
-		if p.Status == "available" && (!s.Affiliate.Enabled || !s.Affiliate.TrackingVerified) {
+		if p.Status == "available" && (!s.Affiliate.CheckEnabled() || !s.Affiliate.TrackingVerified) {
 			s.reply(w, r, 0, nil, platform.Fail(409, "TRACKING_NOT_VERIFIED", "Cần xác minh tích hợp và tracking trước khi bật."))
 			return
 		}
@@ -270,7 +268,7 @@ func (s *Server) adminRoutes(r chi.Router) {
 			return
 		}
 		defer tx.Rollback(r.Context())
-		_, e = tx.Exec(r.Context(), `UPDATE affiliate_channels SET status=$2,settings=jsonb_build_object('template',$3::text) WHERE id=$1`, id, p.Status, p.Template)
+		_, e = tx.Exec(r.Context(), `UPDATE affiliate_channels SET status=$2,settings=settings||jsonb_build_object('template',$3::text) WHERE id=$1`, id, p.Status, p.Template)
 		if e == nil {
 			e = platform.Audit(r.Context(), tx, user(r).ID, "channel_updated", id, p)
 		}
@@ -280,19 +278,41 @@ func (s *Server) adminRoutes(r chi.Router) {
 		s.reply(w, r, 200, p, e)
 	}))
 	r.Get("/admin/browser", s.allowed("settings", false, func(w http.ResponseWriter, r *http.Request) {
-		v := map[string]any{"enabled": s.Affiliate.CheckEnabled(), "trackingVerified": s.Affiliate.TrackingVerified, "remoteAvailable": s.RemoteBrowser != nil && user(r).Role == "admin"}
+		v := map[string]any{"enabled": s.Affiliate.CheckEnabled(), "trackingVerified": s.Affiliate.TrackingVerified, "remoteAvailable": s.RemoteBrowser != nil && user(r).Role == "admin", "localAvailable": s.LocalBrowser && user(r).Role == "admin"}
+		publisher, err := s.Affiliate.PublisherID(r.Context())
+		if err != nil {
+			s.reply(w, r, 0, nil, err)
+			return
+		}
+		v["publisher"] = publisher
 		if s.Affiliate.Browser != nil {
 			v["browser"] = s.Affiliate.Browser.Status()
 		}
 		s.reply(w, r, 200, v, nil)
 	}))
-	r.Put("/admin/browser/cookies", s.allowed("settings", false, s.pasteShopeeCookies))
+	r.Put("/admin/browser/publisher", s.allowed("settings", true, func(w http.ResponseWriter, r *http.Request) {
+		var p struct {
+			Publisher *string `json:"publisher"`
+		}
+		if !s.body(w, r, &p) {
+			return
+		}
+		if p.Publisher == nil {
+			s.reply(w, r, 0, nil, platform.Fail(422, "INVALID_AFFILIATE_ID", "Affiliate ID chỉ gồm chữ số, tối đa 32 ký tự."))
+			return
+		}
+		err := s.Affiliate.SavePublisher(r.Context(), user(r).ID, *p.Publisher)
+		s.reply(w, r, 200, map[string]string{"publisher": strings.TrimSpace(*p.Publisher)}, err)
+	}))
+	r.Put("/admin/browser/cookies", s.allowed("settings", false, func(w http.ResponseWriter, r *http.Request) {
+		s.reply(w, r, 0, nil, platform.Fail(410, "COOKIE_IMPORT_REMOVED", "Nhập cookie đã được tắt. Mở Chrome trên server để đăng nhập Shopee trực tiếp."))
+	}))
 	r.Post("/admin/browser/access", s.allowed("settings", true, func(w http.ResponseWriter, r *http.Request) {
 		if user(r).Role != "admin" {
 			s.reply(w, r, 0, nil, platform.Fail(403, "FORBIDDEN", "Chỉ quản trị viên được mở Chrome trên server."))
 			return
 		}
-		if s.RemoteBrowser == nil || s.Affiliate.Browser == nil {
+		if (s.RemoteBrowser == nil && !s.LocalBrowser) || s.Affiliate.Browser == nil {
 			s.reply(w, r, 0, nil, platform.Fail(503, "BROWSER_UNAVAILABLE", "Chrome từ xa chưa được cấu hình."))
 			return
 		}
@@ -311,12 +331,20 @@ func (s *Server) adminRoutes(r chi.Router) {
 			return
 		}
 		defer tx.Rollback(r.Context())
-		e = platform.Audit(r.Context(), tx, user(r).ID, "remote_browser_opened", "browser", map[string]any{})
+		action := "remote_browser_opened"
+		if s.RemoteBrowser == nil {
+			action = "local_browser_opened"
+		}
+		e = platform.Audit(r.Context(), tx, user(r).ID, action, "browser", map[string]any{})
 		if e == nil {
 			e = tx.Commit(r.Context())
 		}
 		if e != nil {
 			s.reply(w, r, 0, nil, e)
+			return
+		}
+		if s.RemoteBrowser == nil {
+			s.reply(w, r, 201, map[string]any{"local": true, "browser": s.Affiliate.Browser.Status()}, nil)
 			return
 		}
 		cookie, _ := r.Cookie("hx_session")
@@ -563,51 +591,6 @@ func (s *Server) manualOrder(w http.ResponseWriter, r *http.Request) {
 		return map[string]any{"id": id, "tierCode": tier, "sharePercent": cashback.Percent(bps), "cashback": cash}, e
 	})
 	s.reply(w, r, 201, v, e)
-}
-func (s *Server) pasteShopeeCookies(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 96*1024)
-	var p struct {
-		Cookie string `json:"cookie"`
-	}
-	if !s.body(w, r, &p) {
-		return
-	}
-	cookies, e := browser.ParseCookies(p.Cookie)
-	if e != nil {
-		s.reply(w, r, 0, nil, platform.Fail(422, "INVALID_SHOPEE_COOKIES", "Cookie không hợp lệ. Dán JSON cookie xuất từ affiliate.shopee.vn hoặc Cookie header, tối đa 64 KB."))
-		return
-	}
-	if e = s.Store.Limit(r.Context(), "shopee-cookies:"+user(r).ID, 5); e != nil {
-		s.reply(w, r, 0, nil, e)
-		return
-	}
-	if s.Affiliate.Browser == nil {
-		s.reply(w, r, 0, nil, platform.Fail(503, "BROWSER_UNAVAILABLE", "Chromium chưa sẵn sàng. Kiểm tra CHROME_PATH."))
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
-	defer cancel()
-	status, e := s.Affiliate.Browser.PasteCookies(ctx, p.Cookie)
-	if e != nil {
-		code, message := "BROWSER_UNAVAILABLE", "Không áp dụng được cookie. Kiểm tra Chromium và thử lại."
-		if errors.Is(e, browser.ErrCookieStorage) {
-			code, message = "SHOPEE_COOKIE_STORAGE_ERROR", "Không lưu được cookie Shopee vào database. Kiểm tra kết nối và khóa mã hóa."
-		}
-		if errors.Is(e, context.DeadlineExceeded) || errors.Is(e, context.Canceled) {
-			code = "BROWSER_TIMEOUT"
-		}
-		s.reply(w, r, 0, nil, platform.Fail(503, code, message))
-		return
-	}
-	tx, e := s.Store.Pool.Begin(r.Context())
-	if e == nil {
-		defer tx.Rollback(r.Context())
-		e = platform.Audit(r.Context(), tx, user(r).ID, "shopee_cookie_imported", "shopee", map[string]int{"cookieCount": len(cookies)})
-		if e == nil {
-			e = tx.Commit(r.Context())
-		}
-	}
-	s.reply(w, r, 200, status, e)
 }
 func (s *Server) resolveRow(w http.ResponseWriter, r *http.Request) {
 	var p struct {

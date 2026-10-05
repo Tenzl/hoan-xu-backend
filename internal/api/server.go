@@ -31,6 +31,7 @@ type Server struct {
 	Auth               *auth.Service
 	Affiliate          *affiliate.Service
 	RemoteBrowser      *remotebrowser.Service
+	LocalBrowser       bool
 	Origin, PrivateDir string
 	Secure             bool
 	Mux                *chi.Mux

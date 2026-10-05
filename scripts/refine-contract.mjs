@@ -10,8 +10,8 @@ const choice = (...values)=>({type:'string',enum:values});
 const arr = items=>({type:'array',items});
 const obj = (properties,required=Object.keys(properties))=>({type:'object',additionalProperties:false,properties,required});
 const schemas = doc.components.schemas;
-doc.paths['/admin/browser/cookies']={put:{security:[{session:[]}],responses:{'200':{description:'Cookie applied to the shared Chromium session. Returns status only, never cookie values.'},'422':{description:'Invalid cookie input'},'503':{description:'Browser unavailable'}}}};
-doc.paths['/admin/browser/session-checks']={post:{security:[{session:[]}],responses:{'201':{description:'Probes the existing browser session without reloading pasted cookies.'},'503':{description:'Browser unavailable'}}}};
+delete schemas.ShopeeCookieInput;
+doc.paths['/admin/browser/session-checks']={post:{security:[{session:[]}],responses:{'201':{description:'Probes the existing browser session after manual sign-in. Never starts Chrome or imports saved cookies.'},'503':{description:'Browser unavailable'}}}};
 const define = (name,value)=>(schemas[name]=value,{$ref:'#/components/schemas/'+name});
 const tierCode=choice('bronze','platinum','diamond');
 const sharePercent={type:'number',minimum:0,maximum:100,multipleOf:0.01};
@@ -29,7 +29,7 @@ schemas.User.properties.bankDetails={allOf:[bankDetails],nullable:true,descripti
 schemas.User.required=[...new Set([...schemas.User.required,'bankDetails'])];
 const requests = {
  'post /admin/cashback-policies':cashbackInput,
- 'put /admin/browser/cookies':define('ShopeeCookieInput',obj({cookie:str(1,65536)})),
+ 'put /admin/browser/publisher':define('PublisherInput',obj({publisher:{...str(0,32),pattern:'^[0-9]*$'}})),
  'post /auth/internal/login':define('InternalLogin',obj({username:str(3,40),password:str(1,128)})),
  'post /auth/internal/reauth':define('Reauthentication',obj({password:str(1,128)})),
  'patch /me':define('ProfileUpdate',{...obj({name:str(1,80),bankDetails:{oneOf:[bankDetails,obj({bank:{type:'string',enum:['']},account:{type:'string',enum:['']},holder:{type:'string',enum:['']}})],description:'Provide all three valid fields, or three empty strings to clear the saved payout profile.'}},[]),minProperties:1}),
@@ -59,15 +59,16 @@ const requests = {
 const time={type:'string',format:'date-time'};
 const browserStatus=define('BrowserStatus',obj({authenticated:bool,browser:bool,savedCookies:bool,state:choice('not_started','checking','authenticated','login_required','verification_required','unavailable','cookie_storage_error'),pending:num(0,50),workers:num(2,2),starts:num(),lastVerifiedAt:{...time,nullable:true}}));
 const browserEnvelope=obj({data:browserStatus,meta:{$ref:'#/components/schemas/Meta'}});
-doc.paths['/admin/browser'].get.responses['200']={description:'Managed Chromium status; remoteAvailable is true only for administrators when remote display is enabled.',content:{'application/json':{schema:obj({data:obj({enabled:bool,trackingVerified:bool,remoteAvailable:bool,browser:browserStatus},['enabled','trackingVerified','remoteAvailable']),meta:{$ref:'#/components/schemas/Meta'}})}}};
+doc.paths['/admin/browser'].get.responses['200']={description:'Managed Chromium status; remoteAvailable is true only for administrators when remote display is enabled.',content:{'application/json':{schema:obj({data:obj({enabled:bool,trackingVerified:bool,remoteAvailable:bool,localAvailable:bool,publisher:str(0,32),browser:browserStatus},['enabled','trackingVerified','remoteAvailable','localAvailable','publisher']),meta:{$ref:'#/components/schemas/Meta'}})}}};
 const remoteAccess=define('RemoteBrowserAccess',obj({url:{type:'string',format:'uri',description:'Open directly at the backend origin. One-use access ticket is in the fragment; expires after 60 seconds.'},expiresAt:time}));
-doc.paths['/admin/browser/access']={post:{security:[{session:[]}],description:'Administrator only; requires CSRF and recent password authentication. Starts headed Chromium and issues a one-use ticket for a browser display session of at most 10 minutes. Underlying account/session revocation also revokes display access.',responses:{'201':{description:'Remote browser access ticket',content:{'application/json':{schema:obj({data:remoteAccess,meta:{$ref:'#/components/schemas/Meta'}})}}},'401':{description:'Session required'},'403':{description:'Administrator, CSRF and recent password authentication required'},'429':{description:'At most six access requests per minute'},'503':{description:'Remote display or headed Chromium unavailable'}}}};
-doc.paths['/admin/browser/cookies'].put.responses['200'].content={'application/json':{schema:browserEnvelope}};
+const localAccess=define('LocalBrowserAccess',obj({local:{type:'boolean',enum:[true]},browser:browserStatus}));
+doc.paths['/admin/browser/access']={post:{security:[{session:[]}],description:'Administrator only; requires CSRF and recent password authentication. Starts headed Chromium and issues a one-use ticket for a browser display session of at most 10 minutes. Underlying account/session revocation also revokes display access. On loopback development servers without remote display, opens native Chrome and returns local=true.',responses:{'201':{description:'Remote browser access ticket',content:{'application/json':{schema:obj({data:{oneOf:[remoteAccess,localAccess]},meta:{$ref:'#/components/schemas/Meta'}})}}},'401':{description:'Session required'},'403':{description:'Administrator, CSRF and recent password authentication required'},'429':{description:'At most six access requests per minute'},'503':{description:'Remote display or headed Chromium unavailable'}}}};
+doc.paths['/admin/browser/cookies']={put:{security:[{session:[]}],deprecated:true,description:'Retired. Open server Chrome for manual sign-in; cookie imports are no longer supported.',responses:{'410':{description:'Cookie import removed'},'401':{description:'Session required'},'403':{description:'Settings permission and CSRF required'}}}};
+doc.paths['/admin/browser/publisher']={put:{security:[{session:[]}],description:'Saves the Shopee Affiliate ID in channel settings. Requires settings permission, CSRF and recent password authentication; does not enable tracking.',responses:{'200':{description:'Saved Affiliate ID',content:{'application/json':{schema:obj({data:obj({publisher:str(0,32)}),meta:{$ref:'#/components/schemas/Meta'}})}}},'401':{description:'Session required'},'403':{description:'Settings permission, CSRF and recent authentication required'},'422':{description:'Invalid Affiliate ID'}}}};
 doc.paths['/admin/browser/session-checks'].post.responses['201'].content={'application/json':{schema:browserEnvelope}};
-for(const p of ['/admin/browser/cookies','/admin/browser/session-checks']){
- const op=doc.paths[p][p.endsWith('/cookies')?'put':'post'];
+for(const p of ['/admin/browser/session-checks']){
+ const op=doc.paths[p].post;
  op.description='Requires admin or staff settings permission. Returns metadata only. The managed Chromium process and current cookies are reused while it remains alive.';
- if(p.endsWith('/cookies'))op.description+=' Validated cookies are encrypted in the backend database and restored when Chromium starts; cookie values are never returned.';
  for(const code of ['401','403','429'])op.responses[code]={description:code==='401'?'Session required':code==='403'?'Settings permission and CSRF validation required':'Per-user request limit reached'};
 }
 const status=choice('pending','approved','rejected');

@@ -2,7 +2,7 @@ const ticket = new URLSearchParams(location.hash.slice(1)).get("ticket");
 history.replaceState(null, "", "/browser/");
 const status = document.getElementById("status");
 if (!ticket) {
-  status.textContent = "Mở Chrome từ mục Phiên và cookie Shopee trong trang quản trị.";
+  status.textContent = "Mở Chrome từ mục Đăng nhập Shopee trong trang quản trị.";
 } else {
   fetch("/browser/session", {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ticket})})
     .then(async response => {

@@ -15,7 +15,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 	"hoanxu/internal/auth"
-	"hoanxu/internal/browser"
 	"hoanxu/internal/platform"
 	"os"
 	"path/filepath"
@@ -34,7 +33,7 @@ func main() {
 }
 func run() error {
 	if len(os.Args) < 2 {
-		return errors.New("commands: migrate, create, reset, shopee-login, shopee-cookie-import, key")
+		return errors.New("commands: migrate, create, reset, shopee-login, key")
 	}
 	command := os.Args[1]
 	if command == "key" {
@@ -96,7 +95,7 @@ func run() error {
 		return e
 	}
 	password := os.Getenv("ADMIN_PASSWORD")
-	if password == "" && command != "shopee-cookie-import" {
+	if password == "" {
 		return errors.New("Set ADMIN_PASSWORD environment variable; do not pass passwords as command arguments")
 	}
 	ctx := context.Background()
@@ -110,20 +109,6 @@ func run() error {
 		return e
 	}
 	switch command {
-	case "shopee-cookie-import":
-		profile := os.Getenv("CHROME_PROFILE")
-		if profile == "" {
-			profile = "private-data/chrome-profile"
-		}
-		root, e := filepath.Abs(profile)
-		if e != nil {
-			return e
-		}
-		cookies, e := browser.NewDatabaseCookieStore(ctx, pool, s, filepath.Join(filepath.Dir(root), "shopee-cookies.enc"))
-		if e != nil {
-			return e
-		}
-		fmt.Println("Encrypted Shopee cookies available in database:", cookies.Configured())
 	case "create":
 		uid, e := auth.CreateInternal(ctx, s, "", *username, *name, password, *role, nil)
 		if e != nil {

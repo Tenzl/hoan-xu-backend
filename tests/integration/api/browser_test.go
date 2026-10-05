@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-func TestShopeeCookieRoutesArePrivateAndValidateWithoutEcho(t *testing.T) {
+func TestShopeeCookieImportIsRetiredAndDoesNotSaveOrStartChrome(t *testing.T) {
 	store, customer, admin := testStore(t)
 	ctx := context.Background()
 	a := &auth.Service{Store: store}
@@ -39,7 +39,7 @@ func TestShopeeCookieRoutesArePrivateAndValidateWithoutEcho(t *testing.T) {
 	}
 	customerToken, cu := session(customer)
 	adminToken, au := session(admin)
-	manager := browser.NewLazy("missing-test-chromium-executable", t.TempDir(), &browser.CookieStore{Path: t.TempDir() + "/cookies.enc", Codec: store})
+	manager := browser.NewManual("missing-test-chromium-executable", t.TempDir())
 	srv := New(&Server{Store: store, Auth: a, Affiliate: &affiliate.Service{Store: store, Browser: manager}, Origin: "http://localhost:3000", PrivateDir: t.TempDir()})
 	request := func(method, path, body, token, csrf string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "/api/v1"+path, strings.NewReader(body))
@@ -58,9 +58,9 @@ func TestShopeeCookieRoutesArePrivateAndValidateWithoutEcho(t *testing.T) {
 		status            int
 	}{
 		{"", "", valid, 401}, {customerToken, cu.CSRF, valid, 403}, {adminToken, "", valid, 403},
-		{adminToken, au.CSRF, `{"cookie":"invalid"}`, 422},
-		{adminToken, au.CSRF, `{"cookie":"[{\"name\":\"token\",\"value\":\"fixture-secret-never-echo\",\"domain\":\"google.com\"}]"}`, 422},
-		{adminToken, au.CSRF, valid, 503},
+		{adminToken, au.CSRF, `{"cookie":"invalid"}`, 410},
+		{adminToken, au.CSRF, `{"cookie":"[{\"name\":\"token\",\"value\":\"fixture-secret-never-echo\",\"domain\":\"google.com\"}]"}`, 410},
+		{adminToken, au.CSRF, valid, 410},
 	} {
 		w := request("PUT", "/admin/browser/cookies", tc.body, tc.token, tc.csrf)
 		if w.Code != tc.status || strings.Contains(w.Body.String(), "fixture-secret") {
@@ -78,5 +78,8 @@ func TestShopeeCookieRoutesArePrivateAndValidateWithoutEcho(t *testing.T) {
 	var n int
 	if e := store.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE action='shopee_cookie_imported'`).Scan(&n); e != nil || n != 0 {
 		t.Fatal("failed apply recorded as successful", n, e)
+	}
+	if e := store.Pool.QueryRow(ctx, `SELECT count(*) FROM browser_credentials`).Scan(&n); e != nil || n != 0 || manager.Status()["starts"] != 0 {
+		t.Fatal("retired import stored cookies or launched Chrome", n, e)
 	}
 }

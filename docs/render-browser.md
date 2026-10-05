@@ -13,19 +13,18 @@ Vercel; PostgreSQL tiếp tục dùng Supabase. Không cần worker hoặc lapto
 2. Dùng một instance. Cấu hình mẫu `render.yaml` dùng **1 CPU / 2 GB RAM**
    (`1c-2g`) cho Go và Chrome; đây là cấu hình trả phí, cần xem giá trên Render
    trước khi áp dụng. RAM 512 MB có thể không đủ cho Chrome và API chạy cùng nhau.
-3. Cookie được lưu mã hóa trong PostgreSQL, không cần persistent disk để giữ
-   cookie qua restart. Nếu muốn giữ cả profile Chrome và file upload riêng,
-   thêm disk 5 GB, mount `/var/data`. Disk là tùy chọn trả phí và chỉ gắn vào
-   một instance. Cấu hình mẫu `render.yaml` vẫn giữ disk cho profile và upload;
-   có thể bỏ khối `disk` trước khi tạo service mới nếu chỉ cần lưu cookie.
+3. Nếu muốn giữ phiên Chrome và file upload qua restart, thêm disk 5 GB,
+   mount `/var/data`. Disk là tùy chọn trả phí và chỉ gắn vào một instance.
+   Cấu hình mẫu `render.yaml` giữ disk; có thể bỏ khối `disk` trước khi tạo
+   service mới nếu chấp nhận đăng nhập lại và mất file upload sau restart.
 4. Import các giá trị trong `env.prod` vào Render Environment. File này được git
    ignore và không nằm trong Docker image. Giữ nguyên `DATA_ENCRYPTION_KEY` qua
    các lần deploy. Không tạo lại khóa khi đã có dữ liệu mã hóa.
 5. Health check `/readyz`. Public port dùng biến `PORT` của Render (mặc định 10000).
    Chỉ API bind `0.0.0.0`; không mở các port 5900, 6080 hoặc Chrome debugging.
 6. Chạy `/app/admin migrate` bằng kết nối migration có đủ quyền trước khi đưa
-   API mới vào sử dụng. Cookie database yêu cầu migration 10 tạo bảng
-   `browser_credentials` với RLS và thu hồi quyền của Supabase Data API.
+   API mới vào sử dụng. Giữ migration 10 trong lịch sử; API không còn dùng
+   bảng `browser_credentials` để nạp hoặc lưu phiên Shopee.
    Có thể chạy `go run ./cmd/admin migrate` tại máy có cấu hình database đó.
    Không chạy migration tự động mỗi lần container khởi động.
 
@@ -50,36 +49,28 @@ Nếu dùng custom domain backend, đổi `REMOTE_BROWSER_ORIGIN` theo domain m�
 
 ## Đăng nhập và xác minh Shopee
 
-1. Đăng nhập tài khoản **admin** trên frontend, vào **Cài đặt cookie**.
+1. Đăng nhập tài khoản **admin** trên frontend, vào **Đăng nhập Shopee**.
 2. Nhập lại mật khẩu quản trị và chọn **Mở Chrome trên server**.
-3. Trong cửa sổ Chrome từ xa, đăng nhập Shopee Affiliate và hoàn tất kiểm tra
-   Shopee yêu cầu. Đây chính là Chrome mà API dùng để kiểm tra sản phẩm.
-4. Quay lại trang quản trị, chọn **Kiểm tra phiên hiện có**. Không cần xuất cookie
-   từ Chrome cá nhân nếu đăng nhập trực tiếp trên server. Khi phiên hợp lệ,
-   backend tự mã hóa cookie hiện tại và lưu vào bảng `browser_credentials`.
-   Những lần kiểm tra định kỳ cũng cập nhật cookie trong database. Mỗi lần
-   Chrome mới khởi động sau restart sẽ đọc và áp dụng cookie đã lưu từ database.
-5. Đóng phiên điều khiển khi xong. Chrome vẫn chạy; profile chỉ tồn tại qua
-   restart nếu có disk. Cookie trong database không phụ thuộc vào profile.
+3. Trong Chrome từ xa, đăng nhập Shopee Affiliate và hoàn tất xác minh mà
+   Shopee yêu cầu. Đây chính là Chrome API dùng để kiểm tra sản phẩm.
+4. Quay lại quản trị, chọn **Tôi đã đăng nhập — Kiểm tra phiên**.
+5. Nhập **Affiliate ID (Shopee Publisher)** vào ô cấu hình và chọn **Lưu Affiliate ID**.
+   Mã được lưu trong database; các link mới dùng mã đã lưu. Không cần biến
+   `SHOPEE_PUBLISHER` trong Render Environment.
+6. Đóng cửa sổ điều khiển khi xong. Chrome tiếp tục chạy và dùng phiên vừa đăng nhập.
 
-Cookie cũ trong `shopee-cookies.enc` được import khi database chưa có cookie;
-database luôn được ưu tiên nếu đã có dữ liệu. Để chuyển cookie trên máy local
-sang database trước khi deploy, chạy `go run ./cmd/admin shopee-cookie-import`
-với đúng `DATABASE_URL`, `DATA_ENCRYPTION_KEY` và `CHROME_PROFILE`. Không in cookie
-ra terminal hoặc nhập trực tiếp cookie dạng rõ vào Supabase SQL Editor.
+Backend không đọc/ghi cookie Shopee từ database hoặc file; chức năng dán cookie
+đã bị tắt. Chrome chỉ mở khi admin yêu cầu. Sau restart, mở Chrome từ quản trị;
+nếu không có disk, đăng nhập lại. Nếu có disk, Chrome có thể dùng phiên trong
+profile, nhưng Shopee vẫn có thể yêu cầu xác minh lại. Affiliate ID được giữ trong
+database dù không có disk.
 
-`SHOPEE_ENABLED=false` ban đầu không ngăn admin mở Chrome để đăng nhập. Chỉ bật
-kiểm tra sản phẩm sau khi xác minh phiên hoạt động. `SHOPEE_TRACKING_VERIFIED` và
-`SHOPEE_PUBLISHER` chỉ bật/điền khi tracking affiliate thật đã được kiểm chứng.
-Không bật tracking chỉ vì đăng nhập thành công.
+`SHOPEE_TRACKING_VERIFIED` chỉ bật sau khi tracking affiliate thật đã được kiểm
+chứng. Lưu Affiliate ID hoặc đăng nhập thành công chưa tự bật tracking.
 
-Shopee vẫn có thể yêu cầu xác minh lại hoặc từ chối IP của Render. Chạy có giao
-diện không bảo đảm hết kiểm tra; giao diện từ xa giúp xử lý thủ công khi sàn cho
-phép. Cookie lưu trong database không bảo đảm Shopee sẽ chấp nhận một profile
-mới. Container restart làm mất vé/phiên điều khiển, nhưng cookie trong database
-và dữ liệu trên disk (nếu có) còn. Disk khiến deploy cần dừng instance cũ trước khi
-instance mới chạy; có gián đoạn
-ngắn và kết nối màn hình đang mở sẽ bị ngắt.
+Container restart làm mất vé và phiên điều khiển. Disk khiến deploy cần dừng
+instance cũ trước khi instance mới chạy; có gián đoạn ngắn và màn hình đang mở
+sẽ bị ngắt.
 
 ## Bảo vệ màn hình và vận hành
 

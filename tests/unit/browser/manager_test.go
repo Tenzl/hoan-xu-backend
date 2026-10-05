@@ -8,6 +8,32 @@ import (
 	"time"
 )
 
+func TestManualLoginWaitsForAdministratorWithoutCookieStorage(t *testing.T) {
+	m := NewManual("missing-chromium", t.TempDir())
+	if !m.UsesManualLogin() || m.cookies != nil || m.autoStart || m.headless || m.CookiesConfigured() {
+		t.Fatal("manual login must be headed, lazy, and independent of cookie storage")
+	}
+	if _, err := m.PasteCookies(context.Background(), "SPC_EC=unused"); err == nil || err.Error() != "COOKIE_IMPORT_REMOVED" {
+		t.Fatal("manual login allowed cookie import", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { m.Run(ctx); close(done) }()
+	status := m.RefreshSession(context.Background())
+	if status["starts"] != 0 || status["browser"] != false || status["state"] != "login_required" {
+		t.Fatal("checking an unopened manual session launched Chrome", status)
+	}
+	if _, err := m.Check(context.Background(), "123"); err == nil || err.Error() != "SHOPEE_LOGIN_REQUIRED" {
+		t.Fatal("manual mode checked a product without login", err)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("manual browser did not stop")
+	}
+}
+
 func TestManagedBrowserHeadlessConfiguration(t *testing.T) {
 	if err := NewManaged("missing-chromium", t.TempDir(), nil, false).OpenInteractive(); err == nil {
 		t.Fatal("headless browser must reject interactive access before starting Chrome")

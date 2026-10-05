@@ -30,7 +30,7 @@ type Service struct {
 }
 
 func (s *Service) CheckEnabled() bool {
-	return s.Enabled || (s.Browser != nil && s.Browser.CookiesConfigured())
+	return s.Enabled || (s.Browser != nil && (s.Browser.UsesManualLogin() || s.Browser.CookiesConfigured()))
 }
 func (s *Service) Check(ctx context.Context, raw string) (any, error) {
 	shop, item, canonical, e := Resolve(ctx, raw)
@@ -111,7 +111,7 @@ func (s *Service) CreateLink(ctx context.Context, user, raw string) (any, error)
 	if e != nil {
 		return nil, platform.Fail(422, "INVALID_URL", e.Error())
 	}
-	if !s.CheckEnabled() || !s.TrackingVerified || s.Publisher == "" {
+	if !s.CheckEnabled() || !s.TrackingVerified {
 		return nil, platform.Fail(503, "TRACKING_NOT_VERIFIED", "Chưa xác minh tracking Shopee; chưa tạo link hoàn tiền thật.")
 	}
 	tx, e := s.Store.Pool.Begin(ctx)
@@ -129,10 +129,17 @@ func (s *Service) CreateLink(ctx context.Context, user, raw string) (any, error)
 		return nil, platform.Fail(503, "CHANNEL_UNAVAILABLE", "Kênh Shopee chưa được bật.")
 	}
 	var conf struct {
-		Template string `json:"template"`
+		Template  string `json:"template"`
+		Publisher string `json:"publisher"`
 	}
 	if e = json.Unmarshal(settings, &conf); e != nil {
 		return nil, e
+	}
+	if conf.Publisher == "" {
+		conf.Publisher = s.Publisher
+	}
+	if conf.Publisher == "" {
+		return nil, platform.Fail(503, "PUBLISHER_NOT_CONFIGURED", "Nhập Affiliate ID tại trang Đăng nhập Shopee trước khi tạo link.")
 	}
 	tracking := platform.Hash(platform.Token())[:20]
 	u, e := url.Parse(conf.Template)
@@ -141,7 +148,7 @@ func (s *Service) CreateLink(ctx context.Context, user, raw string) (any, error)
 	}
 	q := u.Query()
 	q.Set("origin_link", canonical)
-	q.Set("affiliate_id", s.Publisher)
+	q.Set("affiliate_id", conf.Publisher)
 	q.Set("sub_id", tracking)
 	u.RawQuery = q.Encode()
 	var id string

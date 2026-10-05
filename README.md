@@ -17,9 +17,9 @@ To create the first admin, set `ADMIN_PASSWORD` in your shell environment and ru
 
 ## Shopee
 
-Configure `CHROME_PATH` and a private persistent `CHROME_PROFILE`. Pasted cookies are encrypted in the private database table `browser_credentials`. Use **Cài đặt cookie** in the admin panel to update or check the session.
+Configure `CHROME_PATH` and a private `CHROME_PROFILE`. Open **Đăng nhập Shopee** in the admin panel, choose **Mở Chrome trên server**, sign in inside that Chrome, then choose **Tôi đã đăng nhập — Kiểm tra phiên**. Chrome starts only when an administrator opens it. The API does not import, export or restore Shopee cookies from files or the database.
 
-Successful session checks also save current Shopee cookies encrypted in the database, including cookies obtained by manual login in remote Chrome. A new browser reads them at startup after a restart; checks reuse the current browser session. Apply migration 10 before starting the new API. A legacy `shopee-cookies.enc` file is imported only when the database has no saved cookies; run `go run ./cmd/admin shopee-cookie-import` to import from this machine without starting Chrome. Keep `DATA_ENCRYPTION_KEY` unchanged.
+Enter the Shopee **Affiliate ID (Shopee Publisher)** on the same page and save it. The ID is stored in `affiliate_channels.settings` and used when creating links; no `SHOPEE_PUBLISHER` environment variable is required. Saving an ID or signing in does not automatically enable verified tracking. Chrome keeps its own normal session in its profile; preserving it across Render restarts requires a persistent disk. Without a disk, sign in again after restart. Historical migration 10 and its private table remain, but the API no longer uses their cookie data.
 
 `CHROME_HEADLESS=false` opens Chromium for manual verification on a desktop. `true` runs it hidden. Shopee may still require manual access verification; successful desktop checks do not guarantee cloud/headless operation. No CAPTCHA or two-factor verification is automated.
 
@@ -43,7 +43,7 @@ The frontend contract is `contracts/openapi.yaml`; `node scripts/refine-contract
 
 The current development and production environment files share a Supabase database through its session pooler. Application tables are in the private `hoanxu` schema. See `docs/supabase.md` for the required search path, encryption key and separate test database configuration.
 
-`Dockerfile` and `render.yaml` package this API with headed Chromium, Xvfb and a private noVNC display in one Render Web Service. Production `env.prod` contains the Docker browser paths and remote display origin; import its values into Render Environment. Use one instance and `/readyz` for the health check. Cookies survive restarts through the database without a disk; an optional persistent disk at `/var/data` also preserves the Chrome profile and private uploaded files. An administrator can open the display from **Cài đặt cookie** after confirming their password. See [Render setup and browser verification](docs/render-browser.md) for the deployment steps and limitations. Local development still defaults to `127.0.0.1:8080` and does not enable the remote display.
+`Dockerfile` and `render.yaml` package this API with headed Chromium, Xvfb and a private noVNC display in one Render Web Service. Production `env.prod` contains the Docker browser paths and remote display origin; import its values into Render Environment. Use one instance and `/readyz` for the health check. An optional persistent disk at `/var/data` preserves the Chrome profile and private uploaded files. Without it, sign in to Shopee again after restart. An administrator can open the display from **Đăng nhập Shopee** after confirming their password. See [Render setup and browser verification](docs/render-browser.md) for the deployment steps and limitations. Local development defaults to `127.0.0.1:8080`, headed Chrome and no remote display. The admin page opens a native Chrome window on the machine running the backend.
 
 ## Unified Xu wallet
 

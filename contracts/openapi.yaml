@@ -9082,12 +9082,22 @@
                         },
                         "browser": {
                           "$ref": "#/components/schemas/BrowserStatus"
+                        },
+                        "publisher": {
+                          "type": "string",
+                          "maxLength": 32
+                        },
+                        "localAvailable": {
+                          "type": "boolean",
+                          "description": "Administrator only, when the API is bound to loopback and remote display is disabled."
                         }
                       },
                       "required": [
                         "enabled",
                         "trackingVerified",
-                        "remoteAvailable"
+                        "remoteAvailable",
+                        "publisher",
+                        "localAvailable"
                       ]
                     },
                     "meta": {
@@ -10530,29 +10540,6 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Cookie applied to the shared Chromium session. Returns status only, never cookie values.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/BrowserStatus"
-                    },
-                    "meta": {
-                      "$ref": "#/components/schemas/Meta"
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "meta"
-                  ]
-                }
-              }
-            }
-          },
           "401": {
             "description": "Session required",
             "content": {
@@ -10573,28 +10560,8 @@
               }
             }
           },
-          "422": {
-            "description": "Invalid cookie input",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-user request limit reached",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Browser unavailable",
+          "410": {
+            "description": "Cookie import removed; open server Chrome to sign in.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10604,7 +10571,7 @@
             }
           }
         },
-        "description": "Requires admin or staff settings permission. Returns metadata only. The managed Chromium process and current cookies are reused while it remains alive. Validated cookies are encrypted in the backend database and restored when Chromium starts; cookie values are never returned.",
+        "description": "Retired. Manual sign-in in server Chrome replaces cookie imports. Authenticated settings users receive 410; no cookies are read or saved.",
         "summary": "PUT /admin/browser/cookies",
         "parameters": [
           {
@@ -10632,16 +10599,7 @@
             "description": "Token from GET /me; Origin must match the configured frontend."
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ShopeeCookieInput"
-              }
-            }
-          }
-        }
+        "deprecated": true
       }
     },
     "/admin/browser/session-checks": {
@@ -10653,7 +10611,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Probes the existing browser session without reloading pasted cookies.",
+            "description": "Probes the running browser after manual sign-in; never starts Chrome or imports saved cookies.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11200,7 +11158,7 @@
             "session": []
           }
         ],
-        "description": "Administrator only; requires CSRF and recent password authentication. Starts headed Chromium and issues a one-use ticket for a browser display session of at most 10 minutes. Underlying account/session revocation also revokes display access.",
+        "description": "Administrator only; requires CSRF and recent password authentication. Starts headed Chromium and issues a one-use ticket for a browser display session of at most 10 minutes. Underlying account/session revocation also revokes display access. On loopback development servers with no remote display, opens the native Chrome window and returns local=true instead of a display ticket.",
         "responses": {
           "201": {
             "description": "Remote browser access ticket",
@@ -11211,7 +11169,14 @@
                   "additionalProperties": false,
                   "properties": {
                     "data": {
-                      "$ref": "#/components/schemas/RemoteBrowserAccess"
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/RemoteBrowserAccess"
+                        },
+                        {
+                          "$ref": "#/components/schemas/LocalBrowserAccess"
+                        }
+                      ]
                     },
                     "meta": {
                       "$ref": "#/components/schemas/Meta"
@@ -11293,6 +11258,101 @@
             "description": "Token from GET /me; Origin must match the configured frontend."
           }
         ]
+      }
+    },
+    "/admin/browser/publisher": {
+      "put": {
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "description": "Settings permission, CSRF and recent password authentication required. Stores the Affiliate ID in database configuration without enabling tracking. An empty ID clears it.",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublisherInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Publisher saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "publisher": {
+                          "type": "string",
+                          "maxLength": 32,
+                          "pattern": "^[0-9]*$"
+                        }
+                      },
+                      "required": [
+                        "publisher"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Settings permission, CSRF or recent password authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid Affiliate ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -12698,20 +12758,6 @@
           "holder"
         ]
       },
-      "ShopeeCookieInput": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "cookie": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 65536
-          }
-        },
-        "required": [
-          "cookie"
-        ]
-      },
       "BrowserStatus": {
         "type": "object",
         "additionalProperties": false,
@@ -13341,6 +13387,39 @@
         "required": [
           "url",
           "expiresAt"
+        ]
+      },
+      "PublisherInput": {
+        "type": "object",
+        "properties": {
+          "publisher": {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[0-9]*$"
+          }
+        },
+        "required": [
+          "publisher"
+        ],
+        "additionalProperties": false
+      },
+      "LocalBrowserAccess": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "local": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "browser": {
+            "$ref": "#/components/schemas/BrowserStatus"
+          }
+        },
+        "required": [
+          "local",
+          "browser"
         ]
       }
     }

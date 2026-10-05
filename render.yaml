@@ -8,8 +8,8 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /readyz
-    # Cookies persist in PostgreSQL. This disk also preserves profile/uploads.
-    # For a new service, omit this block if only cookies need to persist.
+    # This optional disk preserves the Chrome profile and private uploads.
+    # Without it, sign in again after restart; uploaded files are ephemeral.
     disk:
       name: hoan-xu-private-data
       mountPath: /var/data
@@ -39,8 +39,6 @@ services:
         value: "false"
       - key: SHOPEE_TRACKING_VERIFIED
         value: "false"
-      - key: SHOPEE_PUBLISHER
-        sync: false
       - key: SHOPEE_SCHEMA_VERIFIED
         value: "true"
       - key: SHOPEE_PRICE_SCALE

@@ -721,5 +721,22 @@
   "Xác nhận mật khẩu quản trị": "Confirm administrator password",
   "Chỉ quản trị viên được mở Chrome trên server.": "Only administrators can open Chrome on the server.",
   "Cookie được lưu mã hóa trong database và tự nạp khi backend khởi động lại.": "Cookies are encrypted in the database and loaded automatically when the backend restarts.",
-  "Không lưu được cookie Shopee vào database. Kiểm tra kết nối và khóa mã hóa.": "Could not save Shopee cookies to the database. Check the connection and encryption key."
+  "Không lưu được cookie Shopee vào database. Kiểm tra kết nối và khóa mã hóa.": "Could not save Shopee cookies to the database. Check the connection and encryption key.",
+  "Đăng nhập Shopee": "Shopee sign-in",
+  "Chưa mở Chrome": "Chrome not opened",
+  "Quản trị viên cần bật Chrome từ xa trên backend để đăng nhập Shopee tại đây.": "An administrator must enable remote Chrome on the backend to sign in to Shopee here.",
+  "Sau khi đăng nhập trong Chrome trên server, quay lại đây và kiểm tra phiên. Backend dùng trực tiếp phiên Chrome đang chạy.": "After signing in to server Chrome, return here and check the session. The backend uses that running Chrome session directly.",
+  "Không có disk giữ profile, bạn cần đăng nhập lại sau khi backend restart.": "Without a disk preserving the profile, you need to sign in again after the backend restarts.",
+  "Tôi đã đăng nhập — Kiểm tra phiên": "I have signed in — Check session",
+  "Đã đăng nhập Shopee. Backend đang dùng phiên Chrome này để kiểm tra sản phẩm.": "Signed in to Shopee. The backend uses this Chrome session to check products.",
+  "Shopee yêu cầu xác minh. Mở Chrome trên server để hoàn tất, sau đó kiểm tra phiên lại.": "Shopee requires verification. Open server Chrome to complete it, then check the session again.",
+  "Chưa đăng nhập Shopee. Mở Chrome trên server và đăng nhập trước khi kiểm tra phiên.": "Not signed in to Shopee. Open server Chrome and sign in before checking the session.",
+  "Đã mở Chrome. Đăng nhập Shopee trong cửa sổ mới, sau đó quay lại kiểm tra phiên. Phiên điều khiển hết hạn sau 10 phút.": "Chrome is open. Sign in to Shopee in the new window, then return to check the session. Remote control expires after 10 minutes.",
+  "Affiliate ID (Shopee Publisher)": "Affiliate ID (Shopee Publisher)",
+  "Nhập Affiliate ID của tài khoản vừa đăng nhập. Mã được lưu trong cấu hình hệ thống và dùng khi tạo link nhận hoa hồng.": "Enter the Affiliate ID of the account you signed in to. It is stored in system settings and used to create commission links.",
+  "Lưu Affiliate ID": "Save Affiliate ID",
+  "Affiliate ID chỉ gồm chữ số, tối đa 32 ký tự.": "Affiliate ID must contain only digits, up to 32 characters.",
+  "Nhập Affiliate ID tại trang Đăng nhập Shopee trước khi tạo link.": "Enter your Affiliate ID on the Shopee sign-in page before creating links.",
+  "Nhập cookie đã được tắt. Mở Chrome trên server để đăng nhập Shopee trực tiếp.": "Cookie import has been disabled. Open server Chrome to sign in to Shopee directly.",
+  "Phiên Shopee Affiliate chưa đăng nhập hoặc đã hết hạn. Mở Chrome trên server trong trang quản trị để đăng nhập lại.": "The Shopee Affiliate session is signed out or expired. Open server Chrome from admin to sign in again."
 }

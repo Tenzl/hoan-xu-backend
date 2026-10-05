@@ -57,14 +57,10 @@ func run() error {
 		return e
 	}
 	enabled := os.Getenv("SHOPEE_ENABLED") == "true"
-	cookieStore, e := browser.NewDatabaseCookieStore(ctx, pool, store, filepath.Join(filepath.Dir(profile), "shopee-cookies.enc"))
-	if e != nil {
-		return fmt.Errorf("Shopee cookie storage unavailable; check database migrations and DATA_ENCRYPTION_KEY")
-	}
-	b := browser.NewManaged(os.Getenv("CHROME_PATH"), profile, cookieStore, enabled, browser.WithHeadless(env("CHROME_HEADLESS", "true") != "false"))
+	b := browser.NewManual(os.Getenv("CHROME_PATH"), profile, browser.WithHeadless(env("CHROME_HEADLESS", "false") != "false"))
 	go b.Run(ctx)
 	scale, _ := strconv.ParseInt(os.Getenv("SHOPEE_PRICE_SCALE"), 10, 64)
-	aff := &affiliate.Service{Store: store, Browser: b, Enabled: enabled, TrackingVerified: os.Getenv("SHOPEE_TRACKING_VERIFIED") == "true", Publisher: os.Getenv("SHOPEE_PUBLISHER"), SchemaVerified: os.Getenv("SHOPEE_SCHEMA_VERIFIED") == "true", PriceScale: scale}
+	aff := &affiliate.Service{Store: store, Browser: b, Enabled: enabled, TrackingVerified: os.Getenv("SHOPEE_TRACKING_VERIFIED") == "true", SchemaVerified: os.Getenv("SHOPEE_SCHEMA_VERIFIED") == "true", PriceScale: scale}
 	private, e := filepath.Abs(env("PRIVATE_DIR", "private-data/files"))
 	if e != nil {
 		return e
@@ -85,6 +81,8 @@ func run() error {
 	}
 	go (&imports.Service{Store: store}).Run(ctx)
 	go maintenance(ctx, store)
+	// A native Chrome window is available only on a loopback development server.
+	server.LocalBrowser = server.RemoteBrowser == nil && env("HOST", "127.0.0.1") == "127.0.0.1"
 	srv := &http.Server{Addr: env("HOST", "127.0.0.1") + ":" + env("PORT", "8080"), Handler: api.New(server), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		<-ctx.Done()

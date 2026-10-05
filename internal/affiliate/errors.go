@@ -14,9 +14,9 @@ func checkError(err error) error {
 	}
 	switch err.Error() {
 	case "SHOPEE_VERIFICATION_REQUIRED":
-		return platform.Fail(503, "SHOPEE_VERIFICATION_REQUIRED", "Shopee yêu cầu xác minh truy cập. Hoàn tất xác minh trên Shopee Affiliate, sau đó cập nhật cookie và kiểm tra lại phiên.")
+		return platform.Fail(503, "SHOPEE_VERIFICATION_REQUIRED", "Shopee yêu cầu xác minh. Mở Chrome trên server để hoàn tất, sau đó kiểm tra phiên lại.")
 	case "SHOPEE_LOGIN_REQUIRED":
-		return platform.Fail(503, "SHOPEE_LOGIN_REQUIRED", "Phiên Shopee Affiliate chưa đăng nhập hoặc đã hết hạn. Cập nhật cookie và kiểm tra lại phiên.")
+		return platform.Fail(503, "SHOPEE_LOGIN_REQUIRED", "Phiên Shopee Affiliate chưa đăng nhập hoặc đã hết hạn. Mở Chrome trên server trong trang quản trị để đăng nhập lại.")
 	case "SHOPEE_COOKIE_STORAGE_ERROR":
 		return platform.Fail(503, "SHOPEE_COOKIE_STORAGE_ERROR", "Không đọc được cookie Shopee đã lưu. Cập nhật lại cookie trong trang quản trị.")
 	case "QUEUE_FULL":
