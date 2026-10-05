@@ -11,6 +11,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
-      - run: go test ./...
-      - run: go vet ./...
+      - run: go run ./tests/run.go
+      - run: go run ./tests/run.go vet
       - run: go build ./cmd/api ./cmd/admin

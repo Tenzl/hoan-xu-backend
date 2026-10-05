@@ -72,6 +72,31 @@ func NewManaged(path, profile string, cookies *CookieStore, enabled bool, option
 }
 func (m *Manager) CookiesConfigured() bool { return m.cookies.Configured() }
 func (m *Manager) SessionVersion() uint64  { m.mu.Lock(); defer m.mu.Unlock(); return m.version }
+
+// OpenInteractive starts the persistent headed browser without requiring an
+// authenticated Shopee session: the administrator needs it to log in first.
+func (m *Manager) OpenInteractive() error {
+	m.mu.Lock()
+	life, headless := m.lifetime, m.headless
+	m.mu.Unlock()
+	if headless {
+		return errors.New("interactive browser requires CHROME_HEADLESS=false")
+	}
+	m.sessionMu.RLock()
+	defer m.sessionMu.RUnlock()
+	err := m.start(life)
+	if err != nil {
+		// An unreachable dashboard must not prevent manual recovery when
+		// Chromium itself started successfully and its window is available.
+		m.mu.Lock()
+		running := m.running()
+		m.mu.Unlock()
+		if running {
+			return nil
+		}
+	}
+	return err
+}
 func (m *Manager) start(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -249,6 +274,12 @@ func (m *Manager) probeSession(ctx context.Context) {
 		locationMu.Unlock()
 	}
 	state := sessionLocationState(location, m.probeURL)
+	var cookieSaveError error
+	if e == nil && state == "authenticated" && m.cookies != nil && m.cookies.Codec != nil {
+		// Capture manually refreshed login cookies too, so container restarts
+		// restore the current session instead of an older pasted export.
+		cookieSaveError = m.saveSessionCookies(tab)
+	}
 	m.mu.Lock()
 	m.authenticated = e == nil && state == "authenticated"
 	now := time.Now().UTC()
@@ -262,7 +293,44 @@ func (m *Manager) probeSession(ctx context.Context) {
 	} else {
 		m.state = "login_required"
 	}
+	if cookieSaveError != nil {
+		m.state = "cookie_storage_error"
+	}
 	m.mu.Unlock()
+}
+
+// saveSessionCookies runs while the shared session lock is held. Only Shopee
+// cookies are exported; values remain encrypted outside the source tree.
+func (m *Manager) saveSessionCookies(ctx context.Context) error {
+	var current []*network.Cookie
+	err := chromedp.Run(ctx, chromedp.ActionFunc(func(c context.Context) error {
+		var err error
+		current, err = network.GetCookies().WithURLs([]string{"https://shopee.vn/", "https://affiliate.shopee.vn/dashboard", "https://affiliate.shopee.vn/offer/product_offer/"}).Do(c)
+		return err
+	}))
+	if err != nil {
+		return errors.New("COOKIE_STORAGE_FAILED")
+	}
+	var exported []exportedCookie
+	for _, cookie := range current {
+		host := strings.TrimPrefix(strings.ToLower(cookie.Domain), ".")
+		if host != "shopee.vn" && host != "affiliate.shopee.vn" || cookie.PartitionKey != nil || cookie.PartitionKeyOpaque {
+			continue
+		}
+		exported = append(exported, exportedCookie{Name: cookie.Name, Value: cookie.Value, Domain: cookie.Domain, Path: cookie.Path, Secure: cookie.Secure, HTTPOnly: cookie.HTTPOnly, HostOnly: !strings.HasPrefix(cookie.Domain, "."), SameSite: string(cookie.SameSite), Expires: cookie.Expires, Session: cookie.Session})
+	}
+	if len(exported) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(exported)
+	if err != nil {
+		return errors.New("COOKIE_STORAGE_FAILED")
+	}
+	// Use the same validated format as manual exports, including size limits.
+	if _, err = ParseCookies(string(raw)); err != nil {
+		return errors.New("COOKIE_STORAGE_FAILED")
+	}
+	return m.cookies.Save(string(raw))
 }
 func (m *Manager) RefreshSession(ctx context.Context) map[string]any {
 	m.mu.Lock()

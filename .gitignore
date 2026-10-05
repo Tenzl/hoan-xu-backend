@@ -1,4 +1,5 @@
 .env
+env.prod
 .env.*
 !.env.example
 .diagnostics/
@@ -7,6 +8,7 @@ private-data/
 chrome-profile/
 bin/
 coverage/
+tests/results/
 *.exe
 *.log
 *.enc

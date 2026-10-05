@@ -14,13 +14,16 @@ func TestCheckinRules(t *testing.T) {
 		award  int
 	}{
 		{"", 0, "2026-10-05", 1, 1},
+		{"2026-10-04", 2, "2026-10-05", 3, 3},
+		{"2026-10-04", 13, "2026-10-05", 14, 11},
+		{"2026-10-04", 29, "2026-10-05", 30, 31},
 		{"2026-10-04", 6, "2026-10-05", 7, 6},
 		{"2026-10-03", 6, "2026-10-05", 1, 1},
 		{"2026-10-04", 30, "2026-10-05", 31, 1},
 	}
 	for _, c := range cases {
 		st, award, err := NextCheckin(c.last, c.streak, c.day)
-		if err != nil || st != c.want || award != c.award {
+		if err != nil || st != c.want || award != c.award*300 {
 			t.Fatalf("%+v: %d %d %v", c, st, award, err)
 		}
 	}

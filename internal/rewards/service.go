@@ -10,15 +10,12 @@ import (
 
 type Service struct{ Store *platform.Store }
 
+// Coins is retained only for old callers; the legacy ledger is read-only.
 func Coins(ctx context.Context, tx pgx.Tx, user, ref, description string, delta int64) error {
-	tag, e := tx.Exec(ctx, `UPDATE coin_accounts SET balance=balance+$2 WHERE user_id=$1 AND balance+$2>=0`, user, delta)
-	if e != nil {
-		return e
-	}
-	if tag.RowsAffected() != 1 {
-		return platform.Fail(409, "INSUFFICIENT_COINS", "Xu không đủ.")
-	}
-	_, e = tx.Exec(ctx, `INSERT INTO coin_transactions(user_id,reference,amount,description) VALUES($1,$2,$3,$4)`, user, ref, delta, description)
+	return platform.Fail(410, "COINS_ALREADY_UNIFIED", "Xu đã được nhập vào ví chung.")
+}
+func lockSystem(ctx context.Context, tx pgx.Tx) error {
+	_, e := tx.Exec(ctx, `SELECT id FROM wallet_accounts WHERE kind='system' FOR UPDATE`)
 	return e
 }
 func (s *Service) Checkin(ctx context.Context, user string) (any, error) {
@@ -27,6 +24,9 @@ func (s *Service) Checkin(ctx context.Context, user string) (any, error) {
 		return nil, e
 	}
 	defer tx.Rollback(ctx)
+	if e = lockSystem(ctx, tx); e != nil {
+		return nil, e
+	}
 	var last string
 	var st int
 	e = tx.QueryRow(ctx, `SELECT coalesce(last_day::text,''),streak FROM coin_accounts WHERE user_id=$1 FOR UPDATE`, user).Scan(&last, &st)
@@ -38,43 +38,30 @@ func (s *Service) Checkin(ctx context.Context, user string) (any, error) {
 	if e != nil {
 		return nil, platform.Fail(409, "ALREADY_CHECKED_IN", "Bạn đã điểm danh hôm nay.")
 	}
-	if _, e = tx.Exec(ctx, `INSERT INTO checkins VALUES($1,$2,$3,$4)`, user, day, next, award); e != nil {
+	if _, e = tx.Exec(ctx, `INSERT INTO checkins(user_id,day,streak,award,award_xu) VALUES($1,$2,$3,$4::integer,$4::integer::bigint)`, user, day, next, award); e != nil {
 		return nil, e
 	}
 	if _, e = tx.Exec(ctx, `UPDATE coin_accounts SET streak=$2,best=greatest(best,$2),last_day=$3 WHERE user_id=$1`, user, next, day); e != nil {
 		return nil, e
 	}
-	if e = Coins(ctx, tx, user, "checkin:"+user+":"+day, "Điểm danh", int64(award)); e != nil {
+	if e = wallet.Credit(ctx, tx, user, "checkin:"+user+":"+day, "Điểm danh", int64(award)); e != nil {
 		return nil, e
 	}
-	return map[string]any{"streak": next, "award": award, "day": day}, tx.Commit(ctx)
+	var available int64
+	if e = tx.QueryRow(ctx, `SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'`, user).Scan(&available); e != nil {
+		return nil, e
+	}
+	return map[string]any{"streak": next, "awardXu": award, "available": available, "day": day}, tx.Commit(ctx)
 }
 func (s *Service) Exchange(ctx context.Context, user, key string, n int64) (any, error) {
-	amount, e := ExchangeAmount(n)
-	if e != nil {
-		return nil, platform.Fail(422, "INVALID_COINS", e.Error())
-	}
-	return s.Store.Action(ctx, user, key, "coin-exchange", map[string]int64{"coins": n}, func(tx pgx.Tx) (any, error) {
-		var enabled bool
-		if e := tx.QueryRow(ctx, `SELECT coalesce((settings->>'coinExchangeEnabled')::boolean,false) FROM app_settings`).Scan(&enabled); e != nil {
-			return nil, e
-		}
-		if !enabled {
-			return nil, platform.Fail(409, "EXCHANGE_DISABLED", "Đổi xu sang tiền chưa được bật.")
-		}
-		if _, e := tx.Exec(ctx, `SELECT id FROM wallet_accounts WHERE kind='system' FOR UPDATE`); e != nil {
-			return nil, e
-		}
-		ref := "exchange:" + user + ":" + key
-		if e := Coins(ctx, tx, user, ref, "Đổi xu thành tiền", -n); e != nil {
-			return nil, e
-		}
-		e := wallet.Credit(ctx, tx, user, ref, "Đổi xu thành tiền", amount)
-		return map[string]int64{"amount": amount, "coins": n}, e
-	})
+	return nil, platform.Fail(410, "COINS_ALREADY_UNIFIED", "Xu đã được nhập vào ví chung.")
 }
+
 func (s *Service) Redeem(ctx context.Context, user, key, gift string) (any, error) {
 	return s.Store.Action(ctx, user, key, "gift-redeem", map[string]string{"giftId": gift}, func(tx pgx.Tx) (any, error) {
+		if e := lockSystem(ctx, tx); e != nil {
+			return nil, e
+		}
 		var cost int64
 		var stock int
 		var active bool
@@ -86,23 +73,26 @@ func (s *Service) Redeem(ctx context.Context, user, key, gift string) (any, erro
 			return nil, platform.Fail(409, "OUT_OF_STOCK", "Quà hiện chưa có mã trong kho.")
 		}
 		var id string
-		e = tx.QueryRow(ctx, `INSERT INTO gift_redemptions(user_id,gift_id,cost) VALUES($1,$2,$3) RETURNING id::text`, user, gift, cost).Scan(&id)
+		e = tx.QueryRow(ctx, `INSERT INTO gift_redemptions(user_id,gift_id,cost,cost_xu,cost_unit) VALUES($1,$2,$3,$3,'xu') RETURNING id::text`, user, gift, cost).Scan(&id)
 		if e != nil {
 			return nil, platform.Conflict(e)
 		}
-		if e = Coins(ctx, tx, user, "gift_hold:"+id, "Giữ xu đổi quà", -cost); e != nil {
+		if e = wallet.Post(ctx, tx, "gift_hold:"+id, "Giữ Xu đổi quà", []wallet.Entry{{User: user, Kind: "available", Amount: -cost}, {User: user, Kind: "gift_held", Amount: cost}}); e != nil {
 			return nil, e
 		}
 		_, e = tx.Exec(ctx, `UPDATE gift_catalog SET stock=stock-1 WHERE id=$1`, gift)
-		return map[string]string{"id": id, "status": "pending"}, e
+		return map[string]any{"id": id, "status": "pending", "costXu": cost}, e
 	})
 }
 func (s *Service) GiftEvent(ctx context.Context, actor, id, key, action, code, reason string) (any, error) {
 	p := map[string]string{"action": action, "code": code, "reason": reason}
 	return s.Store.Action(ctx, actor, key, "gift-event:"+id, p, func(tx pgx.Tx) (any, error) {
+		if e := lockSystem(ctx, tx); e != nil {
+			return nil, e
+		}
 		var user, gift, st string
 		var cost int64
-		e := tx.QueryRow(ctx, `SELECT user_id::text,gift_id,status,cost FROM gift_redemptions WHERE id=$1 FOR UPDATE`, id).Scan(&user, &gift, &st, &cost)
+		e := tx.QueryRow(ctx, `SELECT user_id::text,gift_id,status,cost_xu FROM gift_redemptions WHERE id=$1 FOR UPDATE`, id).Scan(&user, &gift, &st, &cost)
 		if e != nil {
 			return nil, platform.Fail(404, "NOT_FOUND", "Không có yêu cầu.")
 		}
@@ -117,13 +107,16 @@ func (s *Service) GiftEvent(ctx context.Context, actor, id, key, action, code, r
 			}
 			next = "completed"
 			cipher = s.Store.Encrypt(code)
+			if e = wallet.Post(ctx, tx, "gift_paid:"+id, "Đã cấp voucher", []wallet.Entry{{User: user, Kind: "gift_held", Amount: -cost}, {Kind: "system", Amount: cost}}); e != nil {
+				return nil, e
+			}
 			_, e = tx.Exec(ctx, `INSERT INTO notifications(recipient_id,title,body) VALUES($1,'Voucher đã sẵn sàng','Mở Đổi quà để xem mã voucher của bạn.')`, user)
 		} else if action == "rejected" {
 			if !platform.Text(reason, 3, 500) {
 				return nil, platform.Fail(422, "REASON_REQUIRED", "Cần lý do.")
 			}
 			next = "rejected"
-			e = Coins(ctx, tx, user, "gift_refund:"+id, "Hoàn xu đổi quà", cost)
+			e = wallet.Post(ctx, tx, "gift_refund:"+id, "Hoàn Xu đổi quà", []wallet.Entry{{User: user, Kind: "gift_held", Amount: -cost}, {User: user, Kind: "available", Amount: cost}})
 			if e == nil {
 				_, e = tx.Exec(ctx, `UPDATE gift_catalog SET stock=stock+1 WHERE id=$1`, gift)
 			}

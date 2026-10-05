@@ -26,7 +26,7 @@ func TestNormalizationRequiresConfirmedScale(t *testing.T) {
 }
 
 func TestNormalizationMatchesCapturedShopeePages(t *testing.T) {
-	fixture, err := os.ReadFile("testdata/shopee-products-2026-10-05.json")
+	fixture, err := os.ReadFile("../../tests/fixtures/affiliate/shopee-products-2026-10-05.json")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,6 +13,7 @@ import (
 	"hoanxu/internal/cashback"
 	"hoanxu/internal/community"
 	"hoanxu/internal/platform"
+	"hoanxu/internal/remotebrowser"
 	"hoanxu/internal/rewards"
 	"hoanxu/internal/users"
 	"hoanxu/internal/wallet"
@@ -29,6 +30,7 @@ type Server struct {
 	Store              *platform.Store
 	Auth               *auth.Service
 	Affiliate          *affiliate.Service
+	RemoteBrowser      *remotebrowser.Service
 	Origin, PrivateDir string
 	Secure             bool
 	Mux                *chi.Mux
@@ -189,6 +191,9 @@ func New(s *Server) *chi.Mux {
 	r := chi.NewRouter()
 	s.Mux = r
 	r.Use(middleware.RequestID, middleware.Recoverer)
+	if s.RemoteBrowser != nil {
+		r.Mount("/browser", s.RemoteBrowser)
+	}
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		s.reply(w, r, 200, map[string]string{"status": "ok"}, nil)
 	})
@@ -267,7 +272,7 @@ func New(s *Server) *chi.Mux {
 			s.list(w, r, `SELECT jsonb_build_object('name',left(u.name,1)||'***','cashback',sum(o.cashback),'orders',count(*)) FROM orders o JOIN users u ON u.id=o.user_id WHERE o.status='approved' AND date_trunc('month',o.ordered_at AT TIME ZONE 'Asia/Ho_Chi_Minh')=date_trunc('month',now() AT TIME ZONE 'Asia/Ho_Chi_Minh') GROUP BY u.id ORDER BY sum(o.cashback) DESC LIMIT 5`)
 		})
 		r.Get("/gifts", func(w http.ResponseWriter, r *http.Request) {
-			s.list(w, r, `SELECT jsonb_build_object('id',id,'name',name,'channel',channel,'cost',cost,'stock',stock,'active',active) FROM gift_catalog WHERE active ORDER BY cost,id`)
+			s.list(w, r, `SELECT jsonb_build_object('id',id,'name',name,'channel',channel,'costXu',cost,'costUnit','xu','stock',stock,'active',active) FROM gift_catalog WHERE active ORDER BY cost,id`)
 		})
 		r.Post("/product-checks", s.check)
 		r.Post("/shopee/check", s.check)
@@ -357,11 +362,11 @@ func (s *Server) customerRoutes(r chi.Router) {
 		r.Get("/me/dashboard", s.dashboard)
 		r.Get("/me/leaderboard", s.myLeaderboard)
 		r.Get("/wallet", func(w http.ResponseWriter, r *http.Request) {
-			s.one(w, r, `SELECT jsonb_build_object('available',coalesce(max(balance) FILTER(WHERE kind='available'),0),'held',coalesce(max(balance) FILTER(WHERE kind='held'),0),'debt',coalesce(max(balance) FILTER(WHERE kind='debt'),0)) FROM wallet_accounts WHERE user_id=$1`, user(r).ID)
+			s.one(w, r, `SELECT jsonb_build_object('available',coalesce(max(balance) FILTER(WHERE kind='available'),0),'held',coalesce(max(balance) FILTER(WHERE kind='held'),0),'debt',coalesce(max(balance) FILTER(WHERE kind='debt'),0),'giftHeld',coalesce(max(balance) FILTER(WHERE kind='gift_held'),0),'unit','xu') FROM wallet_accounts WHERE user_id=$1`, user(r).ID)
 		})
 		r.Get("/wallet/transactions", func(w http.ResponseWriter, r *http.Request) {
 			l, o := page(r)
-			s.list(w, r, `SELECT jsonb_build_object('id',t.id,'description',t.description,'createdAt',t.created_at,'amount',sum(e.amount) FILTER(WHERE a.kind='available')) FROM wallet_transactions t JOIN wallet_entries e ON e.transaction_id=t.id JOIN wallet_accounts a ON a.id=e.account_id WHERE a.user_id=$1 GROUP BY t.id ORDER BY t.created_at DESC,t.id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o)
+			s.list(w, r, `SELECT jsonb_build_object('id',t.id,'description',t.description,'createdAt',t.created_at,'amount',coalesce(sum(e.amount) FILTER(WHERE a.kind='available'),0),'heldAmount',coalesce(sum(e.amount) FILTER(WHERE a.kind='held'),0),'giftHeldAmount',coalesce(sum(e.amount) FILTER(WHERE a.kind='gift_held'),0),'unit','xu') FROM wallet_transactions t JOIN wallet_entries e ON e.transaction_id=t.id JOIN wallet_accounts a ON a.id=e.account_id WHERE a.user_id=$1 GROUP BY t.id ORDER BY t.created_at DESC,t.id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o)
 		})
 		r.Get("/orders", func(w http.ResponseWriter, r *http.Request) {
 			l, o := page(r)
@@ -413,7 +418,7 @@ func (s *Server) customerRoutes(r chi.Router) {
 			s.reply(w, r, 201, v, e)
 		})
 		r.Get("/checkins", func(w http.ResponseWriter, r *http.Request) {
-			s.one(w, r, `SELECT jsonb_build_object('balance',balance,'streak',streak,'best',best,'lastDay',last_day,'today',$2::text,'checkedIn',last_day=$2::date,'days',coalesce((SELECT jsonb_agg(day ORDER BY day) FROM checkins WHERE user_id=$1 AND day>=($2::date-30)),'[]')) FROM coin_accounts WHERE user_id=$1`, user(r).ID, rewards.LocalDay(time.Now()))
+			s.one(w, r, `SELECT jsonb_build_object('available',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'),'unit','xu','streak',streak,'best',best,'lastDay',last_day,'today',$2::text,'checkedIn',last_day=$2::date,'days',coalesce((SELECT jsonb_agg(day ORDER BY day) FROM checkins WHERE user_id=$1 AND day>=($2::date-30)),'[]')) FROM coin_accounts WHERE user_id=$1`, user(r).ID, rewards.LocalDay(time.Now()))
 		})
 		r.Post("/checkins", func(w http.ResponseWriter, r *http.Request) {
 			v, e := (&rewards.Service{Store: s.Store}).Checkin(r.Context(), user(r).ID)
@@ -421,7 +426,7 @@ func (s *Server) customerRoutes(r chi.Router) {
 		})
 		r.Get("/coins/transactions", func(w http.ResponseWriter, r *http.Request) {
 			l, o := page(r)
-			s.list(w, r, `SELECT jsonb_build_object('id',id,'amount',amount,'description',description,'createdAt',created_at) FROM coin_transactions WHERE user_id=$1 ORDER BY created_at DESC,id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o)
+			s.list(w, r, `SELECT jsonb_build_object('id',id,'amount',amount,'description',description,'createdAt',created_at,'unit','legacy_coin','equivalentXu',amount*300) FROM coin_transactions WHERE user_id=$1 ORDER BY created_at DESC,id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o)
 		})
 		r.Post("/coin-exchanges", func(w http.ResponseWriter, r *http.Request) {
 			var p struct {
@@ -497,7 +502,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var raw []byte
-	e = tx.QueryRow(r.Context(), `SELECT jsonb_build_object('pending',coalesce((SELECT sum(cashback) FROM orders WHERE user_id=$1 AND status='pending'),0),'approved',coalesce((SELECT sum(cashback) FROM orders WHERE user_id=$1 AND status='approved'),0),'available',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'),'held',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='held'),'debt',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='debt'),'coins',(SELECT balance FROM coin_accounts WHERE user_id=$1))`, user(r).ID).Scan(&raw)
+	e = tx.QueryRow(r.Context(), `SELECT jsonb_build_object('pending',coalesce((SELECT sum(cashback) FROM orders WHERE user_id=$1 AND status='pending'),0),'approved',coalesce((SELECT sum(cashback) FROM orders WHERE user_id=$1 AND status='approved'),0),'available',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'),'held',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='held'),'debt',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='debt'),'giftHeld',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='gift_held'),'totalOrders',(SELECT count(*) FROM orders WHERE user_id=$1),'pendingOrders',(SELECT count(*) FROM orders WHERE user_id=$1 AND status='pending'),'rejectedOrders',(SELECT count(*) FROM orders WHERE user_id=$1 AND status='rejected'),'unit','xu')`, user(r).ID).Scan(&raw)
 	var v map[string]any
 	if e == nil {
 		e = json.Unmarshal(raw, &v)

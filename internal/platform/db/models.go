@@ -66,10 +66,11 @@ type CashbackTier struct {
 }
 
 type Checkin struct {
-	UserID pgtype.UUID
-	Day    pgtype.Date
-	Streak int32
-	Award  int32
+	UserID  pgtype.UUID
+	Day     pgtype.Date
+	Streak  int32
+	Award   int32
+	AwardXu pgtype.Int8
 }
 
 type CoinAccount struct {
@@ -123,6 +124,8 @@ type GiftRedemption struct {
 	VoucherCipher pgtype.Text
 	Reason        string
 	CreatedAt     pgtype.Timestamptz
+	CostXu        pgtype.Int8
+	CostUnit      string
 }
 
 type IdempotencyRecord struct {
@@ -310,6 +313,11 @@ type WalletTransaction struct {
 	Reference   string
 	Description string
 	CreatedAt   pgtype.Timestamptz
+}
+
+type WalletUnification struct {
+	ID          bool
+	ConvertedAt pgtype.Timestamptz
 }
 
 type Withdrawal struct {

@@ -1,0 +1,17 @@
+*
+!go.mod
+!go.sum
+!Dockerfile
+!cmd/
+!cmd/**
+!internal/
+!internal/**
+!database/
+!database/migrations/
+!database/migrations/**
+!deploy/
+!deploy/docker/
+!deploy/docker/**
+**/*_test.go
+**/.env*
+**/env.prod

@@ -1,0 +1,22 @@
+name: Docker browser checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test browser access and socket revocation
+        run: go run ./tests/run.go -race -run 'Test(AccessRequires|OneTimeTicket|ExpiryAnd|NoPublicDisplay|ProxyStrips|OriginConfiguration|UpgradedWebSocket)'
+      - name: Build Docker image
+        run: docker build -t hoanxu-browser:check .
+      - name: Check runtime tools and secret exclusion
+        run: |
+          docker run --rm --entrypoint /bin/bash hoanxu-browser:check -c 'test ! -f /app/.env && test ! -f /app/env.prod && test -f /usr/share/novnc/core/rfb.js && command -v Xvfb && command -v x11vnc && command -v websockify && command -v chromium && bash -n /app/deploy/entrypoint.sh'
+      - name: Smoke test headed Chrome and authenticated noVNC
+        shell: pwsh
+        run: ./tests/deployment/docker-smoke.ps1 -Image hoanxu-browser:check

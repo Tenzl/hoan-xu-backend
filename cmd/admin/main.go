@@ -21,7 +21,11 @@ import (
 )
 
 func main() {
-	_ = godotenv.Load()
+	envFile := os.Getenv("ENV_FILE")
+	if envFile == "" {
+		envFile = ".env"
+	}
+	_ = godotenv.Load(envFile)
 	if e := run(); e != nil {
 		fmt.Fprintln(os.Stderr, e)
 		os.Exit(1)

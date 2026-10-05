@@ -227,8 +227,8 @@ func testStoreWithTiers(t *testing.T, tiers bool) (*platform.Store, string, stri
 		_, _ = base.Exec(context.Background(), `DROP SCHEMA `+pgx.Identifier{schema}.Sanitize()+` CASCADE`)
 		base.Close()
 	})
-	for _, name := range []string{"000001_initial.up.sql", "000002_defaults.up.sql", "000003_private_files.up.sql", "000004_order_source.up.sql", "000005_support_faq.up.sql", "000006_user_bank.up.sql", "000007_order_approval_time.up.sql", "000008_cashback_tiers.up.sql"} {
-		if !tiers && name == "000008_cashback_tiers.up.sql" {
+	for _, name := range []string{"000001_initial.up.sql", "000002_defaults.up.sql", "000003_private_files.up.sql", "000004_order_source.up.sql", "000005_support_faq.up.sql", "000006_user_bank.up.sql", "000007_order_approval_time.up.sql", "000008_cashback_tiers.up.sql", "000009_unified_wallet.up.sql"} {
+		if !tiers && (name == "000008_cashback_tiers.up.sql" || name == "000009_unified_wallet.up.sql") {
 			continue
 		}
 		raw, e := os.ReadFile(filepath.Join("../../database/migrations", name))
@@ -353,27 +353,14 @@ func TestCheckinAndExchange(t *testing.T) {
 	if _, e := r.Exchange(ctx, uid, "exchange-test", 10); e == nil {
 		t.Fatal("exchange enabled by default")
 	}
-	_, e := s.Pool.Exec(ctx, `UPDATE app_settings SET settings=jsonb_set(settings,'{coinExchangeEnabled}','true');`)
-	if e != nil {
-		t.Fatal(e)
-	}
-	tx, e := s.Pool.Begin(ctx)
-	if e != nil {
-		t.Fatal(e)
-	}
-	if e = rewards.Coins(ctx, tx, uid, "test-coins", "Test coins", 29); e != nil {
-		t.Fatal(e)
-	}
-	if e = tx.Commit(ctx); e != nil {
-		t.Fatal(e)
-	}
-	if _, e = r.Exchange(ctx, uid, "exchange-test", 20); e != nil {
-		t.Fatal(e)
-	}
 	var balance int64
-	if e = s.Pool.QueryRow(ctx, `SELECT balance FROM coin_accounts WHERE user_id=$1`, uid).Scan(&balance); e != nil || balance != 10 {
+	if e := s.Pool.QueryRow(ctx, `SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'`, uid).Scan(&balance); e != nil || balance != 300 {
 		t.Fatal(balance, e)
 	}
+	if _, e := r.Exchange(ctx, uid, "exchange-test", 20); e == nil {
+		t.Fatal("legacy exchange must remain disabled")
+	}
+
 }
 func TestGiftStockAndRefund(t *testing.T) {
 	s, uid, admin := testStore(t)
@@ -382,7 +369,7 @@ func TestGiftStockAndRefund(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if e = rewards.Coins(ctx, tx, uid, "gift-test-coins", "Test", 100); e != nil {
+	if e = wallet.Credit(ctx, tx, uid, "gift-test-coins", "Test", 30000); e != nil {
 		t.Fatal(e)
 	}
 	if e = tx.Commit(ctx); e != nil {
@@ -396,7 +383,7 @@ func TestGiftStockAndRefund(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	id := v.(map[string]string)["id"]
+	id := v.(map[string]any)["id"].(string)
 	if _, e = r.Redeem(ctx, uid, "gift-test-2", "g1"); e == nil {
 		t.Fatal("duplicate/stock accepted")
 	}
@@ -407,8 +394,8 @@ func TestGiftStockAndRefund(t *testing.T) {
 		t.Fatal("second refund accepted")
 	}
 	var balance int64
-	e = s.Pool.QueryRow(ctx, `SELECT balance FROM coin_accounts WHERE user_id=$1`, uid).Scan(&balance)
-	if e != nil || balance != 100 {
+	e = s.Pool.QueryRow(ctx, `SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'`, uid).Scan(&balance)
+	if e != nil || balance != 30000 {
 		t.Fatal(balance, e)
 	}
 }

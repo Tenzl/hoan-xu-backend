@@ -20,7 +20,7 @@ func NextCheckin(last string, streak int, day string) (int, int, error) {
 		next = streak + 1
 	}
 	bonus := map[int]int{3: 2, 7: 5, 14: 10, 30: 30}
-	return next, 1 + bonus[next], nil
+	return next, (1 + bonus[next]) * 300, nil
 }
 func ExchangeAmount(n int64) (int64, error) {
 	if n < 10 || n%10 != 0 || n > math.MaxInt64/300 {

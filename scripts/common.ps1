@@ -14,7 +14,7 @@ function Get-TaskTool([string]$Name) {
     throw "Missing $Name. Read README.md for installation instructions."
 }
 function Import-TaskEnv {
-    $path = Join-Path $TaskRoot '.env'
+    $path = if ($env:ENV_FILE) { if ([IO.Path]::IsPathRooted($env:ENV_FILE)) { $env:ENV_FILE } else { Join-Path $TaskRoot $env:ENV_FILE } } else { Join-Path $TaskRoot '.env' }
     if (-not (Test-Path -LiteralPath $path)) { throw 'Create .env from .env.example in the backend repository first.' }
     foreach ($line in [IO.File]::ReadAllLines($path)) {
         if ($line -match '^([A-Z_]+)=(.*)$') {

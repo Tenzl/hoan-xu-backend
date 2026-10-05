@@ -13,14 +13,17 @@ type FAQ struct {
 	Answer   string `json:"answer"`
 }
 type Input struct {
-	Brand               string   `json:"brand"`
-	SupportEmail        string   `json:"supportEmail"`
-	CoinExchangeEnabled bool     `json:"coinExchangeEnabled"`
-	MaxDisplayPercent   *float64 `json:"maxDisplayPercent"`
-	FAQ                 []FAQ    `json:"faq"`
+	Brand             string   `json:"brand"`
+	SupportEmail      string   `json:"supportEmail"`
+	WalletUnit        string   `json:"walletUnit"`
+	XuPerVnd          int      `json:"xuPerVnd"`
+	MaxDisplayPercent *float64 `json:"maxDisplayPercent"`
+	FAQ               []FAQ    `json:"faq"`
 }
 
 func (s *Service) Update(ctx context.Context, actor string, p Input) error {
+	p.WalletUnit = "xu"
+	p.XuPerVnd = 1
 	if len(p.FAQ) > 20 {
 		return platform.Fail(422, "VALIDATION_ERROR", "Tối đa 20 câu hỏi thường gặp.")
 	}

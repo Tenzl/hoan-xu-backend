@@ -4091,7 +4091,9 @@
                     "meta"
                   ],
                   "properties": {
-                    "data": {},
+                    "data": {
+                      "$ref": "#/components/schemas/CheckinState"
+                    },
                     "meta": {
                       "type": "object",
                       "properties": {
@@ -4226,7 +4228,9 @@
                     "meta"
                   ],
                   "properties": {
-                    "data": {},
+                    "data": {
+                      "$ref": "#/components/schemas/CheckinResult"
+                    },
                     "meta": {
                       "type": "object",
                       "properties": {
@@ -4518,29 +4522,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data",
-                    "meta"
-                  ],
-                  "properties": {
-                    "data": {},
-                    "meta": {
-                      "type": "object",
-                      "properties": {
-                        "requestId": {
-                          "type": "string"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
+            "description": "Success"
           },
           "400": {
             "description": "Invalid JSON",
@@ -4574,6 +4556,16 @@
           },
           "409": {
             "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "COINS_ALREADY_UNIFIED. This endpoint never mutates balances.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4623,7 +4615,8 @@
             }
           }
         },
-        "summary": "POST /coin-exchanges"
+        "summary": "POST /coin-exchanges",
+        "deprecated": true
       }
     },
     "/gift-redemptions": {
@@ -9067,26 +9060,44 @@
         ],
         "responses": {
           "200": {
-            "description": "Success",
+            "description": "Managed Chromium status; remoteAvailable is true only for administrators when remote display is enabled.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "trackingVerified": {
+                          "type": "boolean"
+                        },
+                        "remoteAvailable": {
+                          "type": "boolean"
+                        },
+                        "browser": {
+                          "$ref": "#/components/schemas/BrowserStatus"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "trackingVerified",
+                        "remoteAvailable"
+                      ]
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
                   "required": [
                     "data",
                     "meta"
-                  ],
-                  "properties": {
-                    "data": {},
-                    "meta": {
-                      "type": "object",
-                      "properties": {
-                        "requestId": {
-                          "type": "string"
-                        }
-                      }
-                    }
-                  }
+                  ]
                 }
               }
             }
@@ -11181,6 +11192,108 @@
           }
         }
       }
+    },
+    "/admin/browser/access": {
+      "post": {
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "description": "Administrator only; requires CSRF and recent password authentication. Starts headed Chromium and issues a one-use ticket for a browser display session of at most 10 minutes. Underlying account/session revocation also revokes display access.",
+        "responses": {
+          "201": {
+            "description": "Remote browser access ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RemoteBrowserAccess"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Administrator, CSRF and recent password authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "At most six access requests per minute",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Remote display or headed Chromium unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "POST /admin/browser/access",
+        "parameters": [
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 500
+            },
+            "description": "Token from GET /me; Origin must match the configured frontend."
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -13134,6 +13247,100 @@
           "tierCode",
           "sharePercent",
           "cashback"
+        ]
+      },
+      "CheckinState": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "xu"
+            ]
+          },
+          "streak": {
+            "type": "integer"
+          },
+          "best": {
+            "type": "integer"
+          },
+          "lastDay": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "today": {
+            "type": "string",
+            "format": "date"
+          },
+          "checkedIn": {
+            "type": "boolean"
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        },
+        "required": [
+          "available",
+          "unit",
+          "streak",
+          "best",
+          "today",
+          "checkedIn",
+          "days"
+        ]
+      },
+      "CheckinResult": {
+        "type": "object",
+        "properties": {
+          "awardXu": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "available": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "streak": {
+            "type": "integer"
+          },
+          "day": {
+            "type": "string",
+            "format": "date"
+          }
+        },
+        "required": [
+          "awardXu",
+          "available",
+          "streak",
+          "day"
+        ]
+      },
+      "RemoteBrowserAccess": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Open directly at the backend origin. One-use access ticket is in the fragment; expires after 60 seconds."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "url",
+          "expiresAt"
         ]
       }
     }

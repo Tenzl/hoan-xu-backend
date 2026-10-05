@@ -9,6 +9,9 @@ import (
 )
 
 func TestManagedBrowserHeadlessConfiguration(t *testing.T) {
+	if err := NewManaged("missing-chromium", t.TempDir(), nil, false).OpenInteractive(); err == nil {
+		t.Fatal("headless browser must reject interactive access before starting Chrome")
+	}
 	if m := NewManaged("", t.TempDir(), nil, false); !m.headless {
 		t.Fatal("default browser should stay headless")
 	}

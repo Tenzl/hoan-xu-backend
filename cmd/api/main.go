@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 	"hoanxu/internal/affiliate"
@@ -10,6 +11,7 @@ import (
 	"hoanxu/internal/browser"
 	"hoanxu/internal/imports"
 	"hoanxu/internal/platform"
+	"hoanxu/internal/remotebrowser"
 	"log/slog"
 	"net/http"
 	"os"
@@ -21,7 +23,7 @@ import (
 )
 
 func main() {
-	_ = godotenv.Load()
+	_ = godotenv.Load(env("ENV_FILE", ".env"))
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	if e := run(); e != nil {
 		slog.Error("startup_failed", "error", e)
@@ -64,9 +66,22 @@ func run() error {
 		return e
 	}
 	server := &api.Server{Store: store, Auth: a, Affiliate: aff, Origin: env("APP_ORIGIN", "http://localhost:3000"), Secure: os.Getenv("COOKIE_SECURE") == "true", PrivateDir: private}
+	if os.Getenv("REMOTE_BROWSER_ENABLED") == "true" {
+		if env("CHROME_HEADLESS", "true") != "false" || os.Getenv("DISPLAY") == "" {
+			return fmt.Errorf("remote browser requires CHROME_HEADLESS=false and DISPLAY")
+		}
+		bridgePassword := os.Getenv("REMOTE_BROWSER_BRIDGE_PASSWORD")
+		if bridgePassword == "" {
+			return fmt.Errorf("remote browser bridge credentials missing; start with the Docker entrypoint")
+		}
+		server.RemoteBrowser, e = remotebrowser.New(a, os.Getenv("REMOTE_BROWSER_ORIGIN"), remotebrowser.WithBridgePassword(bridgePassword))
+		if e != nil {
+			return e
+		}
+	}
 	go (&imports.Service{Store: store}).Run(ctx)
 	go maintenance(ctx, store)
-	srv := &http.Server{Addr: "127.0.0.1:" + env("PORT", "8080"), Handler: api.New(server), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
+	srv := &http.Server{Addr: env("HOST", "127.0.0.1") + ":" + env("PORT", "8080"), Handler: api.New(server), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		<-ctx.Done()
 		c, close := context.WithTimeout(context.Background(), 10*time.Second)

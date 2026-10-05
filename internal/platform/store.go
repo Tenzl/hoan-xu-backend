@@ -108,6 +108,9 @@ func Accounts(ctx context.Context, tx pgx.Tx, user string) error {
 	if e != nil {
 		return e
 	}
+	if _, e = tx.Exec(ctx, `INSERT INTO wallet_accounts(user_id,kind) SELECT $1,'gift_held' WHERE EXISTS(SELECT 1 FROM pg_attribute WHERE attrelid='gift_redemptions'::regclass AND attname='cost_xu' AND NOT attisdropped) ON CONFLICT DO NOTHING`, user); e != nil {
+		return e
+	}
 	_, e = tx.Exec(ctx, `INSERT INTO coin_accounts(user_id) VALUES($1) ON CONFLICT DO NOTHING`, user)
 	return e
 }

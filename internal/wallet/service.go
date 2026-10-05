@@ -123,6 +123,9 @@ type Event struct {
 
 func (s *Service) Process(ctx context.Context, actor, id, key string, p Event) (any, error) {
 	return s.Store.Action(ctx, actor, key, "withdraw-event:"+id, p, func(tx pgx.Tx) (any, error) {
+		if _, e := tx.Exec(ctx, `SELECT id FROM wallet_accounts WHERE kind='system' FOR UPDATE`); e != nil {
+			return nil, e
+		}
 		var user, st string
 		var amount int64
 		var processor *string

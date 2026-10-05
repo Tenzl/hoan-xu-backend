@@ -58,7 +58,7 @@ func (s *Server) adminRoutes(r chi.Router) {
 	r.Get("/admin/users", s.allowed("users", false, func(w http.ResponseWriter, r *http.Request) {
 		l, o := page(r)
 		q := r.URL.Query().Get("q")
-		s.list(w, r, `SELECT jsonb_build_object('id',u.id,'name',u.name,'email',u.email,'role',u.role,'blocked',u.blocked,'trackingCode',u.tracking_code,'createdAt',u.created_at,'available',coalesce((SELECT balance FROM wallet_accounts WHERE user_id=u.id AND kind='available'),0),'held',coalesce((SELECT balance FROM wallet_accounts WHERE user_id=u.id AND kind='held'),0),'coins',coalesce((SELECT balance FROM coin_accounts WHERE user_id=u.id),0)) FROM users u WHERE role='customer' AND ($3='' OR name ILIKE '%'||$3||'%' OR email ILIKE '%'||$3||'%') ORDER BY created_at DESC,id DESC LIMIT $1 OFFSET $2`, l, o, q)
+		s.list(w, r, `SELECT jsonb_build_object('id',u.id,'name',u.name,'email',u.email,'role',u.role,'blocked',u.blocked,'trackingCode',u.tracking_code,'createdAt',u.created_at,'available',coalesce((SELECT balance FROM wallet_accounts WHERE user_id=u.id AND kind='available'),0),'held',coalesce((SELECT balance FROM wallet_accounts WHERE user_id=u.id AND kind='held'),0),'giftHeld',coalesce((SELECT balance FROM wallet_accounts WHERE user_id=u.id AND kind='gift_held'),0)) FROM users u WHERE role='customer' AND ($3='' OR name ILIKE '%'||$3||'%' OR email ILIKE '%'||$3||'%') ORDER BY created_at DESC,id DESC LIMIT $1 OFFSET $2`, l, o, q)
 	}))
 	r.Patch("/admin/users/{id}", s.allowed("users", true, func(w http.ResponseWriter, r *http.Request) {
 		var p struct {
@@ -138,19 +138,19 @@ func (s *Server) adminRoutes(r chi.Router) {
 		s.reply(w, r, 201, v, e)
 	}))
 	r.Get("/admin/gifts", s.allowed("gifts", false, func(w http.ResponseWriter, r *http.Request) {
-		s.list(w, r, `SELECT jsonb_build_object('id',id,'name',name,'channel',channel,'cost',cost,'stock',stock,'active',active) FROM gift_catalog ORDER BY id`)
+		s.list(w, r, `SELECT jsonb_build_object('id',id,'name',name,'channel',channel,'costXu',cost,'costUnit','xu','stock',stock,'active',active) FROM gift_catalog ORDER BY id`)
 	}))
 	r.Patch("/admin/gifts/{id}", s.allowed("gifts", true, func(w http.ResponseWriter, r *http.Request) {
 		var p struct {
 			Name   string `json:"name"`
-			Cost   int64  `json:"cost"`
+			Cost   int64  `json:"costXu"`
 			Stock  int    `json:"stock"`
 			Active bool   `json:"active"`
 		}
 		if !s.body(w, r, &p) {
 			return
 		}
-		if !platform.Text(p.Name, 1, 80) || p.Cost <= 0 || p.Cost > 1000000 || p.Stock < 0 || p.Stock > 100000 {
+		if !platform.Text(p.Name, 1, 80) || p.Cost <= 0 || p.Cost > 1000000000000 || p.Stock < 0 || p.Stock > 100000 {
 			s.reply(w, r, 0, nil, platform.Fail(422, "VALIDATION_ERROR", "Danh mục quà không hợp lệ."))
 			return
 		}
@@ -280,13 +280,49 @@ func (s *Server) adminRoutes(r chi.Router) {
 		s.reply(w, r, 200, p, e)
 	}))
 	r.Get("/admin/browser", s.allowed("settings", false, func(w http.ResponseWriter, r *http.Request) {
-		v := map[string]any{"enabled": s.Affiliate.CheckEnabled(), "trackingVerified": s.Affiliate.TrackingVerified}
+		v := map[string]any{"enabled": s.Affiliate.CheckEnabled(), "trackingVerified": s.Affiliate.TrackingVerified, "remoteAvailable": s.RemoteBrowser != nil && user(r).Role == "admin"}
 		if s.Affiliate.Browser != nil {
 			v["browser"] = s.Affiliate.Browser.Status()
 		}
 		s.reply(w, r, 200, v, nil)
 	}))
 	r.Put("/admin/browser/cookies", s.allowed("settings", false, s.pasteShopeeCookies))
+	r.Post("/admin/browser/access", s.allowed("settings", true, func(w http.ResponseWriter, r *http.Request) {
+		if user(r).Role != "admin" {
+			s.reply(w, r, 0, nil, platform.Fail(403, "FORBIDDEN", "Chỉ quản trị viên được mở Chrome trên server."))
+			return
+		}
+		if s.RemoteBrowser == nil || s.Affiliate.Browser == nil {
+			s.reply(w, r, 0, nil, platform.Fail(503, "BROWSER_UNAVAILABLE", "Chrome từ xa chưa được cấu hình."))
+			return
+		}
+		if e := s.Store.Limit(r.Context(), "browser-access:"+user(r).ID, 6); e != nil {
+			s.reply(w, r, 0, nil, e)
+			return
+		}
+		if e := s.Affiliate.Browser.OpenInteractive(); e != nil {
+			s.reply(w, r, 0, nil, platform.Fail(503, "BROWSER_UNAVAILABLE", "Chromium chưa sẵn sàng. Kiểm tra CHROME_PATH và màn hình ảo."))
+			return
+		}
+		// Record who opened the display; never log the access ticket or cookies.
+		tx, e := s.Store.Pool.Begin(r.Context())
+		if e != nil {
+			s.reply(w, r, 0, nil, e)
+			return
+		}
+		defer tx.Rollback(r.Context())
+		e = platform.Audit(r.Context(), tx, user(r).ID, "remote_browser_opened", "browser", map[string]any{})
+		if e == nil {
+			e = tx.Commit(r.Context())
+		}
+		if e != nil {
+			s.reply(w, r, 0, nil, e)
+			return
+		}
+		cookie, _ := r.Cookie("hx_session")
+		access, e := s.RemoteBrowser.Issue(r.Context(), cookie.Value)
+		s.reply(w, r, 201, access, e)
+	}))
 	r.Post("/admin/browser/session-checks", s.allowed("settings", false, func(w http.ResponseWriter, r *http.Request) {
 		if e := s.Store.Limit(r.Context(), "shopee-session:"+user(r).ID, 6); e != nil {
 			s.reply(w, r, 0, nil, e)
@@ -358,7 +394,7 @@ func (s *Server) withdrawalList(admin bool) http.HandlerFunc {
 func (s *Server) redemptionList(admin bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		l, o := page(r)
-		rows, e := s.pageRows(r, `SELECT jsonb_build_object('id',r.id,'userId',r.user_id,'name',u.name,'giftName',g.name,'giftId',r.gift_id,'cost',r.cost,'status',r.status,'cipher',r.voucher_cipher,'reason',r.reason,'createdAt',r.created_at) FROM gift_redemptions r JOIN gift_catalog g ON g.id=r.gift_id JOIN users u ON u.id=r.user_id WHERE ($4::boolean OR r.user_id=$1) ORDER BY r.created_at DESC,r.id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o, admin)
+		rows, e := s.pageRows(r, `SELECT jsonb_build_object('id',r.id,'userId',r.user_id,'name',u.name,'giftName',g.name,'giftId',r.gift_id,'costXu',r.cost_xu,'legacyCost',CASE WHEN r.cost_unit='legacy_coin' THEN r.cost ELSE NULL END,'costUnit',r.cost_unit,'status',r.status,'cipher',r.voucher_cipher,'reason',r.reason,'createdAt',r.created_at) FROM gift_redemptions r JOIN gift_catalog g ON g.id=r.gift_id JOIN users u ON u.id=r.user_id WHERE ($4::boolean OR r.user_id=$1) ORDER BY r.created_at DESC,r.id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o, admin)
 		if e == nil {
 			for i, b := range rows {
 				var v map[string]any
