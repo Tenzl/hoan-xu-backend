@@ -93,6 +93,33 @@ Vé điều khiển một lần 60 giây, phiên màn hình 10 phút, HttpOnly/S
 Strict, kiểm tra Origin và thu hồi theo session admin vẫn giữ nguyên. Proxy
 không gửi Cookie/Authorization của user sang EC2; nó dùng bridge password riêng.
 
+## Đo thời gian lấy hoa hồng
+
+Checker trả JSON khi response `/api/v3/offer/product` tải xong, không chờ
+toàn bộ trang (ảnh, analytics...) phát sự kiện `load`. Redirect đăng nhập,
+xác minh và API 401/403 vẫn làm phiên hết hiệu lực; tab worker được đóng sau
+khi có kết quả hoặc bị hủy. Lần đầu vẫn cần Shopee khởi chạy JavaScript và gọi
+API; cache 10 phút và singleflight giữ nguyên, cache bị đổi khi phiên thay đổi.
+
+Render Logs có hai bản ghi chỉ chứa thời gian và trạng thái, không chứa URL,
+cookie, dữ liệu sản phẩm hoặc tài khoản:
+
+- `shopee_check_completed`: `resolve_ms`, `check_wait_ms`, `total_ms`,
+  `cache_hit`, `shared`, `success`. `check_wait_ms` bao gồm chờ queue, browser
+  và xử lý kết quả; so sánh với thời gian capture để xác định chờ worker.
+- `shopee_browser_capture`: `session_wait_ms`, `navigation_ms`,
+  `product_request_after_ms`, `product_headers_ms`, `product_ready_after_ms`,
+  `total_ms`, `success`. Các trường `*_after_ms` tính từ lúc worker bắt đầu
+  capture; `product_headers_ms` là thời gian request đến khi nhận xong header
+  đo bởi Chromium (bao gồm DNS/TLS nếu có). `-1` nghĩa là chưa quan sát được
+  mốc tương ứng. `navigation_ms` gồm tạo tab và gửi lệnh mở trang.
+
+Nếu request sản phẩm bắt đầu muộn nhưng `product_headers_ms` thấp, thời gian
+nằm ở mở tab/khởi chạy trang, chưa đủ bằng chứng thiếu RAM. Đo trên Render khi
+check sản phẩm mới và khi hai worker cùng chạy, đối chiếu RAM/CPU EC2 trước
+khi đổi instance. Đo qua tunnel máy quản trị còn bao gồm độ trễ từ máy đó,
+không dùng để kết luận độ trễ Render → EC2.
+
 ## Development, kiểm thử và rollback
 
 Development giữ `BROWSER_MODE=local`, `CHROME_HEADLESS=false`, `CHROME_PATH` và

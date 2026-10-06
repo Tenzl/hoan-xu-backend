@@ -7,6 +7,7 @@ import (
 	"hoanxu/internal/browser"
 	"hoanxu/internal/cashback"
 	"hoanxu/internal/platform"
+	"log/slog"
 	"net/url"
 	"strconv"
 	"sync"
@@ -32,8 +33,16 @@ type Service struct {
 func (s *Service) CheckEnabled() bool {
 	return s.Enabled || (s.Browser != nil && (s.Browser.UsesManualLogin() || s.Browser.CookiesConfigured()))
 }
-func (s *Service) Check(ctx context.Context, raw string) (any, error) {
+func (s *Service) Check(ctx context.Context, raw string) (value any, checkErr error) {
+	started := time.Now()
+	var resolveTime, checkWait time.Duration
+	var cacheHit, shared bool
+	defer func() {
+		// Timings only: never log the input URL, response, cookies or account.
+		slog.Info("shopee_check_completed", "resolve_ms", resolveTime.Milliseconds(), "check_wait_ms", checkWait.Milliseconds(), "total_ms", time.Since(started).Milliseconds(), "cache_hit", cacheHit, "shared", shared, "success", checkErr == nil)
+	}()
 	shop, item, canonical, e := Resolve(ctx, raw)
+	resolveTime = time.Since(started)
 	if e != nil {
 		return nil, platform.Fail(422, "INVALID_URL", e.Error())
 	}
@@ -45,6 +54,7 @@ func (s *Service) Check(ctx context.Context, raw string) (any, error) {
 	entry, ok := s.cache[key]
 	s.mu.Unlock()
 	if ok && time.Since(entry.at) < 600*time.Second {
+		cacheHit = true
 		return json.RawMessage(entry.data), nil
 	}
 	ch := s.group.DoChan(key, func() (any, error) {
@@ -98,10 +108,14 @@ func (s *Service) Check(ctx context.Context, raw string) (any, error) {
 		s.mu.Unlock()
 		return json.RawMessage(serialized), nil
 	})
+	waitStarted := time.Now()
 	select {
 	case <-ctx.Done():
+		checkWait = time.Since(waitStarted)
 		return nil, platform.Fail(504, "SHOPEE_TIMEOUT", "Kiểm tra Shopee quá thời gian.")
 	case r := <-ch:
+		checkWait = time.Since(waitStarted)
+		shared = r.Shared
 		return r.Val, r.Err
 	}
 }

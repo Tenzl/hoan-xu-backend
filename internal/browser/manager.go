@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
+	"log/slog"
 	"net/url"
 	"strings"
 	"sync"
@@ -569,7 +571,17 @@ func (m *Manager) Check(ctx context.Context, item string) ([]byte, error) {
 	}
 }
 func (m *Manager) capture(lifetime, request context.Context, item string) (bodyResult []byte, captureError error) {
+	started := time.Now()
+	var sessionWait, navigationTime time.Duration
+	var mu sync.Mutex
+	productStartedMS, productHeadersMS, productReadyMS := int64(-1), int64(-1), int64(-1)
+	defer func() {
+		mu.Lock()
+		defer mu.Unlock()
+		slog.Info("shopee_browser_capture", "session_wait_ms", sessionWait.Milliseconds(), "navigation_ms", navigationTime.Milliseconds(), "product_request_after_ms", productStartedMS, "product_headers_ms", productHeadersMS, "product_ready_after_ms", productReadyMS, "total_ms", time.Since(started).Milliseconds(), "success", captureError == nil)
+	}()
 	m.sessionMu.RLock()
+	sessionWait = time.Since(started)
 	defer m.sessionMu.RUnlock()
 	if m.remoteURL != "" {
 		m.mu.Lock()
@@ -608,20 +620,34 @@ func (m *Manager) capture(lifetime, request context.Context, item string) (bodyR
 	}()
 	ids := make(chan network.RequestID, 8)
 	expired := make(chan struct{}, 1)
-	var mu sync.Mutex
 	targets := map[network.RequestID]bool{}
 	chromedp.ListenTarget(tab, func(ev any) {
 		switch e := ev.(type) {
 		case *page.EventFrameNavigated:
-			if e.Frame.ParentID == "" && sessionLocationState(e.Frame.URL, m.offerBaseURL+item) == "verification_required" {
+			if e.Frame.ParentID == "" && e.Frame.URL != "about:blank" && e.Frame.URL != "" && !strings.HasPrefix(e.Frame.URL, "chrome-error://") {
+				state := sessionLocationState(e.Frame.URL, m.offerBaseURL+item)
+				u, err := url.Parse(e.Frame.URL)
+				if state != "verification_required" {
+					if err == nil && u.Host == m.responseHost && !strings.Contains(u.Path, "login") {
+						return
+					}
+					state = "login_required"
+				}
 				m.mu.Lock()
 				m.authenticated = false
-				m.state = "verification_required"
+				m.state = state
 				m.mu.Unlock()
 				select {
 				case expired <- struct{}{}:
 				default:
 				}
+			}
+		case *network.EventRequestWillBeSent:
+			u, err := url.Parse(e.Request.URL)
+			if err == nil && u.Host == m.responseHost && u.Path == "/api/v3/offer/product" && u.Query().Get("item_id") == item {
+				mu.Lock()
+				productStartedMS = time.Since(started).Milliseconds()
+				mu.Unlock()
 			}
 		case *network.EventResponseReceived:
 			u, er := url.Parse(e.Response.URL)
@@ -634,12 +660,18 @@ func (m *Manager) capture(lifetime, request context.Context, item string) (bodyR
 			if er == nil && u.Host == m.responseHost && u.Path == "/api/v3/offer/product" && u.Query().Get("item_id") == item && e.Response.Status == 200 {
 				mu.Lock()
 				targets[e.RequestID] = true
+				if e.Response.Timing != nil {
+					productHeadersMS = int64(e.Response.Timing.ReceiveHeadersEnd)
+				}
 				mu.Unlock()
 			}
 		case *network.EventLoadingFinished:
 			mu.Lock()
 			ok := targets[e.RequestID]
 			delete(targets, e.RequestID)
+			if ok {
+				productReadyMS = time.Since(started).Milliseconds()
+			}
 			mu.Unlock()
 			if ok {
 				select {
@@ -649,7 +681,21 @@ func (m *Manager) capture(lifetime, request context.Context, item string) (bodyR
 			}
 		}
 	})
-	if e := chromedp.Run(tab, m.trackTarget(), network.Enable(), chromedp.Navigate(m.offerBaseURL+item)); e != nil {
+	// Navigate starts the page but does not wait for its load event: the product
+	// JSON can arrive while unrelated images or analytics are still loading.
+	navigationStarted := time.Now()
+	e := chromedp.Run(tab, m.trackTarget(), network.Enable(), chromedp.ActionFunc(func(ctx context.Context) error {
+		_, _, errorText, _, err := page.Navigate(m.offerBaseURL + item).Do(ctx)
+		if err != nil {
+			return err
+		}
+		if errorText != "" {
+			return fmt.Errorf("page load error %s", errorText)
+		}
+		return nil
+	}))
+	navigationTime = time.Since(navigationStarted)
+	if e != nil {
 		m.mu.Lock()
 		verification := m.state == "verification_required"
 		m.mu.Unlock()
@@ -657,24 +703,6 @@ func (m *Manager) capture(lifetime, request context.Context, item string) (bodyR
 			return nil, errors.New("SHOPEE_VERIFICATION_REQUIRED")
 		}
 		return nil, e
-	}
-	var location string
-	if e := chromedp.Run(tab, chromedp.Location(&location)); e == nil {
-		if sessionLocationState(location, m.offerBaseURL+item) == "verification_required" {
-			m.mu.Lock()
-			m.authenticated = false
-			m.state = "verification_required"
-			m.mu.Unlock()
-			return nil, errors.New("SHOPEE_VERIFICATION_REQUIRED")
-		}
-		u, _ := url.Parse(location)
-		if u == nil || u.Host != m.responseHost || strings.Contains(u.Path, "login") {
-			m.mu.Lock()
-			m.authenticated = false
-			m.state = "login_required"
-			m.mu.Unlock()
-			return nil, errors.New("SHOPEE_LOGIN_REQUIRED")
-		}
 	}
 	for {
 		select {
@@ -691,6 +719,27 @@ func (m *Manager) capture(lifetime, request context.Context, item string) (bodyR
 		case <-tab.Done():
 			return nil, tab.Err()
 		case id := <-ids:
+			// A response and a session redirect may arrive together. Check the
+			// current document before accepting the product response.
+			var location string
+			if err := chromedp.Run(tab, chromedp.Location(&location)); err != nil {
+				return nil, err
+			}
+			state := sessionLocationState(location, m.offerBaseURL+item)
+			u, err := url.Parse(location)
+			if state == "verification_required" || err != nil || u.Host != m.responseHost || strings.Contains(u.Path, "login") {
+				m.mu.Lock()
+				m.authenticated = false
+				m.state = "login_required"
+				if state == "verification_required" {
+					m.state = state
+				}
+				m.mu.Unlock()
+				if state == "verification_required" {
+					return nil, errors.New("SHOPEE_VERIFICATION_REQUIRED")
+				}
+				return nil, errors.New("SHOPEE_LOGIN_REQUIRED")
+			}
 			var body []byte
 			e := chromedp.Run(tab, chromedp.ActionFunc(func(c context.Context) error { var er error; body, er = network.GetResponseBody(id).Do(c); return er }))
 			if e != nil {
