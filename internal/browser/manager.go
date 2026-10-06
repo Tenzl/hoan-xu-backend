@@ -50,6 +50,7 @@ type Manager struct {
 	cancel          context.CancelFunc
 	allocatorCancel context.CancelFunc
 	queue           chan job
+	workerTabs      chan *workerTab
 	path, profile   string
 	authenticated   bool
 }
@@ -325,6 +326,9 @@ func (m *Manager) Run(ctx context.Context) {
 	}
 }
 func (m *Manager) Close() {
+	m.sessionMu.Lock()
+	defer m.sessionMu.Unlock()
+	m.closeWorkerTabs()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.cancel != nil {
@@ -363,17 +367,24 @@ func (m *Manager) probeSession(ctx context.Context) {
 	m.mu.Lock()
 	root := m.root
 	m.mu.Unlock()
-	tab, cancel := chromedp.NewContext(root)
-	defer func() { cancel(); m.forgetTarget(tab) }()
-	go func() {
-		select {
-		case <-ctx.Done():
-			cancel()
-		case <-tab.Done():
+	var w *workerTab
+	var tab context.Context
+	if m.workerTabs != nil {
+		var err error
+		w, err = m.acquireWorker(root, ctx)
+		if err != nil {
+			return
 		}
-	}()
+		tab = w.ctx
+	} else {
+		var cancel context.CancelFunc
+		tab, cancel = chromedp.NewContext(root)
+		defer func() { cancel(); m.forgetTarget(tab) }()
+	}
 	tab, timeout := context.WithTimeout(tab, 20*time.Second)
 	defer timeout()
+	stopRequest := context.AfterFunc(ctx, timeout)
+	defer stopRequest()
 	var location string
 	var locationMu sync.Mutex
 	var latestLocation string
@@ -391,6 +402,14 @@ func (m *Manager) probeSession(ctx context.Context) {
 		locationMu.Unlock()
 	}
 	state := sessionLocationState(location, m.probeURL)
+	if w != nil {
+		w.ready = e == nil && state == "authenticated" && waitForWorkerApp(tab) == nil
+		w.item = ""
+		m.releaseWorker(w, w.ready)
+		if e == nil && state == "authenticated" {
+			m.prewarmWorkers(ctx)
+		}
+	}
 	var cookieSaveError error
 	if e == nil && state == "authenticated" && m.cookies != nil && m.cookies.Codec != nil {
 		// Capture manually refreshed login cookies too, so container restarts
@@ -573,12 +592,13 @@ func (m *Manager) Check(ctx context.Context, item string) ([]byte, error) {
 func (m *Manager) capture(lifetime, request context.Context, item string) (bodyResult []byte, captureError error) {
 	started := time.Now()
 	var sessionWait, navigationTime time.Duration
+	var warmNavigation, navigationFallback bool
 	var mu sync.Mutex
 	productStartedMS, productHeadersMS, productReadyMS := int64(-1), int64(-1), int64(-1)
 	defer func() {
 		mu.Lock()
 		defer mu.Unlock()
-		slog.Info("shopee_browser_capture", "session_wait_ms", sessionWait.Milliseconds(), "navigation_ms", navigationTime.Milliseconds(), "product_request_after_ms", productStartedMS, "product_headers_ms", productHeadersMS, "product_ready_after_ms", productReadyMS, "total_ms", time.Since(started).Milliseconds(), "success", captureError == nil)
+		slog.Info("shopee_browser_capture", "session_wait_ms", sessionWait.Milliseconds(), "navigation_ms", navigationTime.Milliseconds(), "warm_navigation", warmNavigation, "navigation_fallback", navigationFallback, "product_request_after_ms", productStartedMS, "product_headers_ms", productHeadersMS, "product_ready_after_ms", productReadyMS, "total_ms", time.Since(started).Milliseconds(), "success", captureError == nil)
 	}()
 	m.sessionMu.RLock()
 	sessionWait = time.Since(started)
@@ -607,45 +627,86 @@ func (m *Manager) capture(lifetime, request context.Context, item string) (bodyR
 	m.mu.Lock()
 	root := m.root
 	m.mu.Unlock()
-	tab, cancel := chromedp.NewContext(root)
-	defer func() { cancel(); m.forgetTarget(tab) }()
+	var tab context.Context
+	navigationStarted := time.Now()
+	if m.workerTabs != nil {
+		w, err := m.acquireWorker(root, request)
+		if err != nil {
+			return nil, err
+		}
+		tab = w.ctx
+		warmNavigation = w.ready && w.item != item
+		defer func() {
+			w.ready = captureError == nil
+			w.item = item
+			m.releaseWorker(w, w.ready)
+		}()
+	} else {
+		var cancel context.CancelFunc
+		tab, cancel = chromedp.NewContext(root)
+		defer func() { cancel(); m.forgetTarget(tab) }()
+	}
 	tab, stop := context.WithTimeout(tab, 20*time.Second)
 	defer stop()
-	go func() {
-		select {
-		case <-request.Done():
-			cancel()
-		case <-tab.Done():
-		}
-	}()
+	stopRequest := context.AfterFunc(request, stop)
+	defer stopRequest()
 	ids := make(chan network.RequestID, 8)
 	expired := make(chan struct{}, 1)
 	targets := map[network.RequestID]bool{}
+	var mainFrame cdp.FrameID
+	if warmNavigation {
+		if err := chromedp.Run(tab, chromedp.ActionFunc(func(ctx context.Context) error {
+			tree, err := page.GetFrameTree().Do(ctx)
+			if err == nil {
+				mainFrame = tree.Frame.ID
+			}
+			return err
+		})); err != nil {
+			return nil, err
+		}
+	}
+	checkLocation := func(location string) {
+		if location == "" || location == "about:blank" || strings.HasPrefix(location, "chrome-error://") {
+			return
+		}
+		state := sessionLocationState(location, m.offerBaseURL+item)
+		u, err := url.Parse(location)
+		if state != "verification_required" {
+			if err == nil && u.Host == m.responseHost && !strings.Contains(u.Path, "login") {
+				return
+			}
+			state = "login_required"
+		}
+		m.mu.Lock()
+		m.authenticated = false
+		m.state = state
+		m.mu.Unlock()
+		select {
+		case expired <- struct{}{}:
+		default:
+		}
+	}
 	chromedp.ListenTarget(tab, func(ev any) {
 		switch e := ev.(type) {
 		case *page.EventFrameNavigated:
-			if e.Frame.ParentID == "" && e.Frame.URL != "about:blank" && e.Frame.URL != "" && !strings.HasPrefix(e.Frame.URL, "chrome-error://") {
-				state := sessionLocationState(e.Frame.URL, m.offerBaseURL+item)
-				u, err := url.Parse(e.Frame.URL)
-				if state != "verification_required" {
-					if err == nil && u.Host == m.responseHost && !strings.Contains(u.Path, "login") {
-						return
-					}
-					state = "login_required"
-				}
-				m.mu.Lock()
-				m.authenticated = false
-				m.state = state
-				m.mu.Unlock()
-				select {
-				case expired <- struct{}{}:
-				default:
-				}
+			if e.Frame.ParentID == "" {
+				mu.Lock()
+				mainFrame = e.Frame.ID
+				mu.Unlock()
+				checkLocation(e.Frame.URL)
+			}
+		case *page.EventNavigatedWithinDocument:
+			mu.Lock()
+			main := e.FrameID == mainFrame
+			mu.Unlock()
+			if main {
+				checkLocation(e.URL)
 			}
 		case *network.EventRequestWillBeSent:
 			u, err := url.Parse(e.Request.URL)
 			if err == nil && u.Host == m.responseHost && u.Path == "/api/v3/offer/product" && u.Query().Get("item_id") == item {
 				mu.Lock()
+				targets[e.RequestID] = false
 				productStartedMS = time.Since(started).Milliseconds()
 				mu.Unlock()
 			}
@@ -659,8 +720,11 @@ func (m *Manager) capture(lifetime, request context.Context, item string) (bodyR
 			}
 			if er == nil && u.Host == m.responseHost && u.Path == "/api/v3/offer/product" && u.Query().Get("item_id") == item && e.Response.Status == 200 {
 				mu.Lock()
-				targets[e.RequestID] = true
-				if e.Response.Timing != nil {
+				_, current := targets[e.RequestID]
+				if current {
+					targets[e.RequestID] = true
+				}
+				if current && e.Response.Timing != nil {
 					productHeadersMS = int64(e.Response.Timing.ReceiveHeadersEnd)
 				}
 				mu.Unlock()
@@ -683,8 +747,7 @@ func (m *Manager) capture(lifetime, request context.Context, item string) (bodyR
 	})
 	// Navigate starts the page but does not wait for its load event: the product
 	// JSON can arrive while unrelated images or analytics are still loading.
-	navigationStarted := time.Now()
-	e := chromedp.Run(tab, m.trackTarget(), network.Enable(), chromedp.ActionFunc(func(ctx context.Context) error {
+	fullNavigate := chromedp.ActionFunc(func(ctx context.Context) error {
 		_, _, errorText, _, err := page.Navigate(m.offerBaseURL + item).Do(ctx)
 		if err != nil {
 			return err
@@ -693,7 +756,12 @@ func (m *Manager) capture(lifetime, request context.Context, item string) (bodyR
 			return fmt.Errorf("page load error %s", errorText)
 		}
 		return nil
-	}))
+	})
+	var navigation chromedp.Action = fullNavigate
+	if warmNavigation {
+		navigation = navigateWorker(m.offerBaseURL + item)
+	}
+	e := chromedp.Run(tab, m.trackTarget(), network.Enable(), navigation)
 	navigationTime = time.Since(navigationStarted)
 	if e != nil {
 		m.mu.Lock()
@@ -704,8 +772,26 @@ func (m *Manager) capture(lifetime, request context.Context, item string) (bodyR
 		}
 		return nil, e
 	}
+	var fallback <-chan time.Time
+	if warmNavigation {
+		timer := time.NewTimer(3 * time.Second)
+		defer timer.Stop()
+		fallback = timer.C
+	}
 	for {
 		select {
+		case <-fallback:
+			fallback = nil
+			mu.Lock()
+			startedProduct := productStartedMS >= 0
+			mu.Unlock()
+			if !startedProduct {
+				// Sites without a working SPA route fall back to normal navigation.
+				navigationFallback = true
+				if err := chromedp.Run(tab, fullNavigate); err != nil {
+					return nil, err
+				}
+			}
 		case <-expired:
 			m.mu.Lock()
 			if m.state == "verification_required" {

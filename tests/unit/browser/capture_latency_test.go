@@ -52,6 +52,9 @@ func TestCaptureDoesNotWaitForUnrelatedPageResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Exercise the cold navigation fallback: unrelated resources must never
+	// delay a valid response even before a worker has been warmed.
+	m.workerTabs = nil
 	m.probeURL = server.URL + "/dashboard"
 	m.offerBaseURL = server.URL + "/offer/"
 	u, _ := url.Parse(server.URL)

@@ -20,6 +20,9 @@ func NewRemote(endpoint string) (*Manager, error) {
 	m := NewManual("", "")
 	m.remoteURL = endpoint
 	m.autoStart = true
+	m.workerTabs = make(chan *workerTab, 2)
+	m.workerTabs <- nil
+	m.workerTabs <- nil
 	return m, nil
 }
 

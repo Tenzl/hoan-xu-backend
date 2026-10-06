@@ -76,10 +76,9 @@ func TestRemoteLifecycleCaptureAndRecovery(t *testing.T) {
 			if active.Load() > 0 {
 				probeDuringWork.Store(true)
 			}
-			fmt.Fprint(w, "<body>fixture session</body>")
+			fmt.Fprint(w, remoteSPAHTML)
 		case strings.HasPrefix(r.URL.Path, "/offer/"):
-			item := strings.TrimPrefix(r.URL.Path, "/offer/")
-			fmt.Fprintf(w, `<body><script>fetch('/api/v3/offer/product?item_id=%s')</script></body>`, item)
+			fmt.Fprint(w, remoteSPAHTML)
 		case r.URL.Path == "/api/v3/offer/product":
 			n := active.Add(1)
 			defer active.Add(-1)
@@ -186,8 +185,8 @@ func TestRemoteLifecycleCaptureAndRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, target := range targets {
-		if strings.HasPrefix(target.URL, server.URL+"/offer/") {
-			t.Fatal("completed worker tab leaked", target.URL)
+		if target.URL == server.URL+"/offer/cancelled" {
+			t.Fatal("cancelled worker tab leaked", target.URL)
 		}
 	}
 	if maxActive.Load() != 2 {
@@ -204,6 +203,25 @@ func TestRemoteLifecycleCaptureAndRecovery(t *testing.T) {
 	}
 	if _, err := remoteWebSocket(context.Background(), endpoint); err != nil {
 		t.Fatal("Go shutdown killed external Chrome", err)
+	}
+	response, err := (&http.Client{Timeout: 3 * time.Second}).Get(endpoint + "/json/list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var remaining []struct{ Type string }
+	err = json.NewDecoder(response.Body).Decode(&remaining)
+	response.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pagesAfterClose := 0
+	for _, info := range remaining {
+		if info.Type == "page" {
+			pagesAfterClose++
+		}
+	}
+	if pagesAfterClose != 1 {
+		t.Fatal("Go shutdown leaked its controller/warm tabs or closed the native tab", pagesAfterClose)
 	}
 	// Reattach, verify the existing profile, and lose the external process.
 	m = configure(relay.URL)
@@ -240,7 +258,7 @@ func TestRemoteLifecycleCaptureAndRecovery(t *testing.T) {
 			pages++
 		}
 	}
-	if pages != 2 {
+	if pages != 4 {
 		t.Fatal("tunnel reconnect leaked controller/worker tabs or closed the native tab", pages)
 	}
 	if m.SessionVersion() <= oldVersion {

@@ -96,10 +96,22 @@ không gửi Cookie/Authorization của user sang EC2; nó dùng bridge password
 ## Đo thời gian lấy hoa hồng
 
 Checker trả JSON khi response `/api/v3/offer/product` tải xong, không chờ
-toàn bộ trang (ảnh, analytics...) phát sự kiện `load`. Redirect đăng nhập,
-xác minh và API 401/403 vẫn làm phiên hết hiệu lực; tab worker được đóng sau
-khi có kết quả hoặc bị hủy. Lần đầu vẫn cần Shopee khởi chạy JavaScript và gọi
-API; cache 10 phút và singleflight giữ nguyên, cache bị đổi khi phiên thay đổi.
+toàn bộ trang (ảnh, analytics...) phát sự kiện `load`. Remote mode giữ tối đa
+hai tab worker đã tải dashboard, chuyển sản phẩm bằng router của Shopee để
+không khởi chạy lại JavaScript mỗi lần. Shopee vẫn tự gọi API và tạo security
+context. Probe mượn tab worker khi cả hai rảnh; tab đăng nhập của admin giữ riêng.
+
+Lượt thành công trả tab vào pool. Lỗi, hủy hoặc timeout đóng tab đó; lượt sau
+tạo lại. Go shutdown đóng toàn bộ tab do Go tạo, giữ Chromium và tab admin.
+Khi router không tạo request sản phẩm sau 3 giây, checker mở trang theo cách
+thông thường. Kiểm tra lại đúng sản phẩm trong cùng tab cũng reload để nhận
+response mới; response cũ bắt đầu trước lượt kiểm tra không được chấp nhận.
+Redirect đăng nhập/xác minh (kể cả trong SPA) và API 401/403 vẫn làm phiên hết
+hiệu lực. Local mode vẫn dùng tab riêng và đóng sau từng lượt.
+
+Khởi động/reconnect/kiểm tra phiên cần tải sẵn các tab trước khi trạng thái
+browser thành authenticated. API/database readiness độc lập với việc này.
+Cache 10 phút và singleflight giữ nguyên, cache bị đổi khi phiên thay đổi.
 
 Render Logs có hai bản ghi chỉ chứa thời gian và trạng thái, không chứa URL,
 cookie, dữ liệu sản phẩm hoặc tài khoản:
@@ -109,7 +121,10 @@ cookie, dữ liệu sản phẩm hoặc tài khoản:
   và xử lý kết quả; so sánh với thời gian capture để xác định chờ worker.
 - `shopee_browser_capture`: `session_wait_ms`, `navigation_ms`,
   `product_request_after_ms`, `product_headers_ms`, `product_ready_after_ms`,
-  `total_ms`, `success`. Các trường `*_after_ms` tính từ lúc worker bắt đầu
+  `warm_navigation`, `navigation_fallback`, `total_ms`, `success`.
+  `warm_navigation=true` nghĩa là dùng router trong tab đã tải sẵn;
+  `navigation_fallback=true` nghĩa là phải mở trang thông thường sau đó.
+  Các trường `*_after_ms` tính từ lúc worker bắt đầu
   capture; `product_headers_ms` là thời gian request đến khi nhận xong header
   đo bởi Chromium (bao gồm DNS/TLS nếu có). `-1` nghĩa là chưa quan sát được
   mốc tương ứng. `navigation_ms` gồm tạo tab và gửi lệnh mở trang.
