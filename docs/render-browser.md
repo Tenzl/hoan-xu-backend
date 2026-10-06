@@ -47,10 +47,18 @@ Không tái tạo encryption key. Migration vẫn chạy riêng bằng `/app/adm
 | `PRIVATE_DIR` | `/var/data/files` |
 | `COOKIE_SECURE` | `true` |
 
+File cấu hình production tổng là `env.prod` hiện có, nằm ngoài Git. Cập nhật
+các biến trong bảng vào file này, giữ nguyên secrets database/encryption/OAuth
+và các biến ứng dụng; không tạo thêm file env riêng cho Render. Khi import
+Render Environment → Add from .env, dùng `env.prod` đã cập nhật. SSH private
+key nằm trong giá trị quoted nhiều dòng của `CHROME_SSH_PRIVATE_KEY`; giữ
+nguyên xuống dòng và xác nhận Render nhận đầy đủ giá trị trước khi deploy.
+`CHROME_SSH_KNOWN_HOSTS` cũng cần quoted vì có khoảng trắng.
+
 Bỏ các biến Chrome local cũ (`CHROME_PATH`, `CHROME_PROFILE`, `DISPLAY`,
-`CHROME_HEADLESS`) khỏi Render Environment để tránh nhầm lẫn. Không import nguyên
-file `env.prod` cũ dành cho container gộp Chrome/Go. Không sửa secrets đã có trong
-file local chỉ để thử kết nối. Frontend giữ `BACKEND_URL` nếu origin Go không đổi.
+`CHROME_HEADLESS`) khỏi file production và Render Environment để tránh nhầm
+lẫn. File `.env`/`.env.local` cho development giữ cấu hình local riêng.
+Frontend giữ `BACKEND_URL` nếu origin Go không đổi.
 
 Entrypoint ghi SSH key vào thư mục tạm mode 700, file mode 600; không ghi key
 vào disk upload và không chuyển biến chứa key cho process API. SSH dùng
