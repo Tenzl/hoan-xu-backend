@@ -59,7 +59,7 @@ try {
   [void](Invoke-SmokeDocker run --rm --network $taskNetwork @taskEnv --entrypoint /app/admin $Image migrate)
   [void](Invoke-SmokeDocker run --rm --network $taskNetwork @taskEnv -e "ADMIN_PASSWORD=$taskPassword" --entrypoint /app/admin $Image create --username smokeadmin --name SmokeAdmin --role admin)
   [void](Invoke-SmokeDocker exec $taskDB psql -U hoanxu -d hoanxu_browser_test -c 'UPDATE internal_credentials SET must_change=false;')
-  [void](Invoke-SmokeDocker run -d --name $taskAPI --network $taskNetwork @taskEnv -e BROWSER_MODE=remote -e CHROME_SSH_TUNNEL_ENABLED=true -e "CHROME_SSH_HOST=$taskChrome" -e CHROME_SSH_PORT=2222 -e "CHROME_SSH_PRIVATE_KEY=$taskPrivateKey" -e "CHROME_SSH_KNOWN_HOSTS=$taskKnownHosts" -e "REMOTE_BROWSER_BRIDGE_PASSWORD=$taskBridge" -e "REMOTE_BROWSER_ORIGIN=$taskOrigin" -e APP_ORIGIN=http://localhost:3000 -e COOKIE_SECURE=false -p "127.0.0.1:${Port}:10000" -v "${taskVolume}:/var/data" $Image)
+  [void](Invoke-SmokeDocker run -d --name $taskAPI --cap-drop KILL --network $taskNetwork @taskEnv -e BROWSER_MODE=remote -e CHROME_SSH_TUNNEL_ENABLED=true -e "CHROME_SSH_HOST=$taskChrome" -e CHROME_SSH_PORT=2222 -e "CHROME_SSH_PRIVATE_KEY=$taskPrivateKey" -e "CHROME_SSH_KNOWN_HOSTS=$taskKnownHosts" -e "REMOTE_BROWSER_BRIDGE_PASSWORD=$taskBridge" -e "REMOTE_BROWSER_ORIGIN=$taskOrigin" -e APP_ORIGIN=http://localhost:3000 -e COOKIE_SECURE=false -p "127.0.0.1:${Port}:10000" -v "${taskVolume}:/var/data" $Image)
   $taskPrivateKey = $null
   $taskSession = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
   for ($attempt = 0; $attempt -lt 60; $attempt++) {
@@ -122,6 +122,8 @@ try {
     Start-Sleep -Seconds 1
   }
   Assert-Smoke $restartedReady 'API did not restart successfully.'
+  $taskRestartLogs = (Invoke-SmokeDocker logs $taskAPI) -join "`n"
+  Assert-Smoke (-not ($taskRestartLogs -match 'Unexpected error when forwarding signal')) 'Init could not forward signals without CAP_KILL.'
   Assert-Smoke (((Invoke-SmokeDocker inspect --format '{{.State.StartedAt}}' $taskChrome) -join '') -eq $chromeStarted) 'Restarting Go restarted Chromium.'
   [void](Invoke-SmokeDocker exec $taskChrome /bin/bash -c 'test -d /var/lib/shopee-chrome/Default && test "$(cat /var/lib/shopee-chrome/persistence-smoke)" = profile-smoke')
   for ($attempt = 0; $attempt -lt 60; $attempt++) {

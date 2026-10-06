@@ -7,6 +7,13 @@ if [ "$(id -u)" = 0 ]; then
   exec gosu hoanxu "$0" "$@"
 fi
 
+# Run init and its children with the same UID. Some hosts remove CAP_KILL,
+# which prevents a root init from forwarding signals after gosu changes UID.
+if [ "${HOANXU_TINI_STARTED:-}" != true ]; then
+  export HOANXU_TINI_STARTED=true
+  exec /usr/bin/tini -s -- "$0" "$@"
+fi
+
 if [ "${BROWSER_MODE:-local}" != remote ] || [ "${CHROME_SSH_TUNNEL_ENABLED:-true}" != true ]; then
   exec /app/api
 fi

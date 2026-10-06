@@ -30,4 +30,4 @@ EXPOSE 10000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
  CMD curl --fail --silent "http://127.0.0.1:${PORT}/readyz" > /dev/null || exit 1
 # Bootstrap disk permissions, then immediately drop privileges for all services.
-ENTRYPOINT ["/usr/bin/tini", "--", "/app/deploy/entrypoint.sh"]
+ENTRYPOINT ["/app/deploy/entrypoint.sh"]
