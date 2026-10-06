@@ -18,6 +18,7 @@ import (
 type job struct {
 	ctx     context.Context
 	item    string
+	link    *offerLinkRequest
 	result  chan result
 	started chan struct{}
 }
@@ -290,11 +291,11 @@ func (m *Manager) Run(ctx context.Context) {
 						continue
 					}
 					close(j.started)
-					b, e := m.captureAttempt(ctx, j.ctx, j.item, 1)
+					b, e := m.captureAttemptWithLink(ctx, j.ctx, j.item, 1, j.link)
 					var f *Failure
 					if errors.As(e, &f) && f.Retryable && j.ctx.Err() == nil {
 						if deadline, ok := j.ctx.Deadline(); ok && time.Until(deadline) >= 5*time.Second {
-							b, e = m.captureAttempt(ctx, j.ctx, j.item, 2)
+							b, e = m.captureAttemptWithLink(ctx, j.ctx, j.item, 2, j.link)
 						}
 					}
 					j.result <- result{b, e}
@@ -550,6 +551,10 @@ func (m *Manager) PasteCookies(ctx context.Context, raw string) (map[string]any,
 	return m.Status(), nil
 }
 func (m *Manager) Check(ctx context.Context, item string) ([]byte, error) {
+	return m.submit(ctx, item, nil)
+}
+
+func (m *Manager) submit(ctx context.Context, item string, link *offerLinkRequest) ([]byte, error) {
 	m.mu.Lock()
 	if (m.remoteURL != "" || m.root != nil) && !m.running() {
 		m.authenticated = false
@@ -572,7 +577,7 @@ func (m *Manager) Check(ctx context.Context, item string) ([]byte, error) {
 	}
 	request, cancel := context.WithTimeout(ctx, 40*time.Second)
 	defer cancel()
-	j := job{ctx: request, item: item, result: make(chan result, 1), started: make(chan struct{})}
+	j := job{ctx: request, item: item, link: link, result: make(chan result, 1), started: make(chan struct{})}
 	select {
 	case m.queue <- j:
 	default:

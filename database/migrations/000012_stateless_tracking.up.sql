@@ -1,0 +1,10 @@
+ALTER TABLE cashback_policies ADD COLUMN tracking_version bigint GENERATED ALWAYS AS IDENTITY UNIQUE;
+ALTER TABLE cashback_policies ADD CONSTRAINT tracking_version_range CHECK(tracking_version BETWEEN 1 AND 4294967295);
+ALTER TABLE orders ADD COLUMN tracking_code text;
+ALTER TABLE orders ADD COLUMN tracking_sub_ids jsonb;
+ALTER TABLE orders ADD COLUMN link_created_at timestamptz;
+ALTER TABLE orders ADD COLUMN link_expires_at timestamptz;
+ALTER TABLE orders ADD COLUMN cashback_mode text NOT NULL DEFAULT 'commission_share' CHECK(cashback_mode IN ('commission_share','signed_link'));
+ALTER TABLE import_rows DROP CONSTRAINT import_rows_status_check;
+ALTER TABLE import_rows ADD CONSTRAINT import_rows_status_check CHECK(status IN ('valid','invalid','unmatched','applied','duplicate','adjustment','ignored'));
+ALTER TABLE orders ADD CONSTRAINT signed_link_metadata CHECK(cashback_mode <> 'signed_link' OR (tracking_code IS NOT NULL AND tracking_sub_ids IS NOT NULL AND link_created_at IS NOT NULL AND link_expires_at = link_created_at + interval '168 hours'));

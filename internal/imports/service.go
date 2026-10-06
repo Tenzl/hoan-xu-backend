@@ -3,6 +3,7 @@ package imports
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/jackc/pgx/v5"
 	"hoanxu/internal/cashback"
 	"hoanxu/internal/platform"
@@ -24,20 +25,11 @@ func (s *Service) Preview(ctx context.Context, actor, filename, hash string, map
 	if e != nil {
 		return nil, e
 	}
-	counts := map[string]int{"valid": 0, "invalid": 0, "unmatched": 0}
+	counts := map[string]int{"valid": 0, "invalid": 0, "unmatched": 0, "ignored": 0}
 	for i, row := range rows {
-		status := "valid"
-		if row.Error != "" {
-			status = "invalid"
-		} else {
-			var exists bool
-			e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM affiliate_links WHERE tracking_code=$1)`, row.Tracking).Scan(&exists)
-			if e != nil {
-				return nil, e
-			}
-			if !exists {
-				status = "unmatched"
-			}
+		status, err := validateRow(ctx, tx, s.Store, &row)
+		if err != nil {
+			return nil, err
 		}
 		counts[status]++
 		b, _ := json.Marshal(row)
@@ -148,48 +140,62 @@ func (s *Service) applyOne(ctx context.Context, batch string) (bool, error) {
 	if e = json.Unmarshal(payload, &row); e != nil {
 		return false, e
 	}
-	var user, link, policy string
-	var tier *string
-	var minBps, maxBps int
-	e = tx.QueryRow(ctx, `SELECT user_id::text,id::text,policy_id::text,tier_code,min_share_bps,max_share_bps FROM affiliate_links WHERE tracking_code=$1 AND channel=$2`, row.Tracking, row.Channel).Scan(&user, &link, &policy, &tier, &minBps, &maxBps)
 	status := "applied"
-	if e == pgx.ErrNoRows {
-		status = "unmatched"
-	} else if e != nil {
-		return false, e
+	validation, err := validateRow(ctx, tx, s.Store, &row)
+	if err != nil {
+		return false, err
+	}
+	if validation != "valid" {
+		status = validation
 	} else {
+		if row.NativeShopee {
+			a, err := Attribute(ctx, tx, s.Store, &row)
+			if err != nil {
+				return false, err
+			}
+			if e = platform.LockTracking(ctx, tx, a.User, row.Tracking); e != nil {
+				return false, e
+			}
+		}
 		if e = cashback.LockOrder(ctx, tx, row.Channel, row.Publisher, row.OrderID, row.LineID); e != nil {
 			return false, e
 		}
-		var oldStatus string
+		var oldStatus, mode, trackingCode string
 		var oldCommission, oldValue int64
 		var oldBps int
-		e = tx.QueryRow(ctx, `SELECT status,commission,value,share_bps FROM orders WHERE channel=$1 AND publisher=$2 AND external_id=$3 AND line_id=$4 FOR UPDATE`, row.Channel, row.Publisher, row.OrderID, row.LineID).Scan(&oldStatus, &oldCommission, &oldValue, &oldBps)
+		e = tx.QueryRow(ctx, `SELECT status,commission,value,share_bps,cashback_mode,coalesce(tracking_code,'') FROM orders WHERE channel=$1 AND publisher=$2 AND external_id=$3 AND line_id=$4 FOR UPDATE`, row.Channel, row.Publisher, row.OrderID, row.LineID).Scan(&oldStatus, &oldCommission, &oldValue, &oldBps, &mode, &trackingCode)
 		if e == nil {
-			status = "duplicate"
-			if oldStatus == "approved" && (oldCommission != row.Commission || row.Status != "approved" || oldValue != row.Value) {
-				status = "adjustment"
-			} else if oldStatus == "pending" {
-				cash, er := cashback.Amount(row.Commission, oldBps)
-				if er != nil {
-					return false, er
+			if trackingCode != "" && trackingCode != row.Tracking {
+				status = "ignored"
+				row.Error = "Tracking không khớp đơn đã nhập"
+			} else {
+				status = "duplicate"
+				if oldStatus == "approved" && (oldCommission != row.Commission || row.Status != "approved" || oldValue != row.Value) {
+					status = "adjustment"
+					// Preserve the existing explicit ledger adjustment flow, but retain the latest source state.
+					_, e = tx.Exec(ctx, `UPDATE orders SET source_status=$5 WHERE channel=$1 AND publisher=$2 AND external_id=$3 AND line_id=$4`, row.Channel, row.Publisher, row.OrderID, row.LineID, row.Status)
+					if e != nil {
+						return false, e
+					}
+				} else if oldStatus == "pending" || oldStatus == "rejected" {
+					cash, er := cashback.OrderAmount(row.Commission, oldBps, mode)
+					if er != nil {
+						return false, er
+					}
+					next := "pending"
+					if row.Status == "rejected" {
+						cash = 0
+						next = "rejected"
+					}
+					_, e = tx.Exec(ctx, `UPDATE orders SET source_status=$8,product_name=$5,value=$6,commission=$7,cashback=$9,status=$10,ordered_at=$11 WHERE channel=$1 AND publisher=$2 AND external_id=$3 AND line_id=$4`, row.Channel, row.Publisher, row.OrderID, row.LineID, row.Name, row.Value, row.Commission, row.Status, cash, next, row.Date)
+					if e != nil {
+						return false, e
+					}
+					status = "applied"
 				}
-				_, e = tx.Exec(ctx, `UPDATE orders SET source_status=$8,product_name=$5,value=$6,commission=$7,cashback=$9 WHERE channel=$1 AND publisher=$2 AND external_id=$3 AND line_id=$4`, row.Channel, row.Publisher, row.OrderID, row.LineID, row.Name, row.Value, row.Commission, row.Status, cash)
-				if e != nil {
-					return false, e
-				}
-				status = "applied"
 			}
-		} else if e == pgx.ErrNoRows {
-			bps, er := cashback.Sample(nil, minBps, maxBps)
-			if er != nil {
-				return false, er
-			}
-			cash, er := cashback.Amount(row.Commission, bps)
-			if er != nil {
-				return false, er
-			}
-			_, e = tx.Exec(ctx, `INSERT INTO orders(user_id,link_id,policy_id,channel,publisher,external_id,line_id,product_name,value,commission,cashback,ordered_at,source_status,tier_code,share_bps) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$13,$11,$12,$14,$15)`, user, link, policy, row.Channel, row.Publisher, row.OrderID, row.LineID, row.Name, row.Value, row.Commission, row.Date, row.Status, cash, tier, bps)
+		} else if errors.Is(e, pgx.ErrNoRows) {
+			_, _, e = InsertSignedOrder(ctx, tx, s.Store, &row)
 			if e != nil {
 				return false, e
 			}
@@ -197,7 +203,8 @@ func (s *Service) applyOne(ctx context.Context, batch string) (bool, error) {
 			return false, e
 		}
 	}
-	_, e = tx.Exec(ctx, `UPDATE import_rows SET status=$3 WHERE batch_id=$1 AND row_number=$2`, batch, number, status)
+
+	_, e = tx.Exec(ctx, `UPDATE import_rows SET status=$3,error=nullif($4,'') WHERE batch_id=$1 AND row_number=$2`, batch, number, status, row.Error)
 	if e != nil {
 		return false, e
 	}

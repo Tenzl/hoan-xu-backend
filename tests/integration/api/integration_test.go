@@ -84,6 +84,9 @@ func TestCSVCommitIsRestartableAndDoesNotApprovePendingSource(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	if _, e = s.Pool.Exec(ctx, `INSERT INTO orders(user_id,link_id,policy_id,channel,publisher,external_id,line_id,product_name,value,commission,cashback,ordered_at,source_status) SELECT $1,l.id,l.policy_id,'shopee','publisher','one','line','Test',100000,5000,2500,now(),'pending' FROM affiliate_links l WHERE tracking_code='csvtracking'`, uid); e != nil {
+		t.Fatal(e)
+	}
 	csv := "channel,publisher,order_id,line_id,tracking_code,date,product_name,value,commission,status\nshopee,publisher,one,line,csvtracking,2026-10-05,Test,100000,5000,pending\nshopee,publisher,two,line,unknown,2026-10-05,Test,100000,5000,approved\n"
 	rows, e := imports.Parse(strings.NewReader(csv), nil)
 	if e != nil {
@@ -214,6 +217,10 @@ func testStoreWithTiers(t *testing.T, tiers bool) (*platform.Store, string, stri
 	if e != nil {
 		t.Fatal(e)
 	}
+	// Extensions must live in public, not in a per-test schema dropped by cleanup.
+	if _, e = base.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public; DO $$ BEGIN IF EXISTS(SELECT 1 FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace WHERE e.extname='pgcrypto' AND n.nspname<>'public') THEN ALTER EXTENSION pgcrypto SET SCHEMA public; END IF; END $$;`); e != nil {
+		t.Fatal(e)
+	}
 	if _, e = base.Exec(ctx, `CREATE SCHEMA `+pgx.Identifier{schema}.Sanitize()); e != nil {
 		t.Fatal(e)
 	}
@@ -227,7 +234,7 @@ func testStoreWithTiers(t *testing.T, tiers bool) (*platform.Store, string, stri
 		_, _ = base.Exec(context.Background(), `DROP SCHEMA `+pgx.Identifier{schema}.Sanitize()+` CASCADE`)
 		base.Close()
 	})
-	for _, name := range []string{"000001_initial.up.sql", "000002_defaults.up.sql", "000003_private_files.up.sql", "000004_order_source.up.sql", "000005_support_faq.up.sql", "000006_user_bank.up.sql", "000007_order_approval_time.up.sql", "000008_cashback_tiers.up.sql", "000009_unified_wallet.up.sql", "000010_browser_credentials.up.sql", "000011_remove_saved_links.up.sql"} {
+	for _, name := range []string{"000001_initial.up.sql", "000002_defaults.up.sql", "000003_private_files.up.sql", "000004_order_source.up.sql", "000005_support_faq.up.sql", "000006_user_bank.up.sql", "000007_order_approval_time.up.sql", "000008_cashback_tiers.up.sql", "000009_unified_wallet.up.sql", "000010_browser_credentials.up.sql", "000011_remove_saved_links.up.sql", "000012_stateless_tracking.up.sql", "000013_link_cashback_rate.up.sql", "000014_saved_cashback_links.up.sql"} {
 		if !tiers && (name == "000008_cashback_tiers.up.sql" || name == "000009_unified_wallet.up.sql") {
 			continue
 		}

@@ -22,7 +22,7 @@ type paging struct {
 
 var cursorRoutes = map[string]paging{
 	"/api/v1/orders":              {"o.ordered_at,o.id", "orderedAt", 1},
-	"/api/v1/affiliate-links":     {"created_at,id", "createdAt", 1},
+	"/api/v1/affiliate-links":     {"l.created_at,l.id", "createdAt", 1},
 	"/api/v1/coins/transactions":  {"created_at,id", "createdAt", 1},
 	"/api/v1/wallet/transactions": {"t.created_at,t.id", "createdAt", 1},
 	"/api/v1/notifications":       {"n.created_at,n.id", "createdAt", 1},

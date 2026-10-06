@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 
@@ -99,10 +98,11 @@ func TestShopeePublisherConfigurationRequiresSettingsCSRFAndReauthentication(t *
 	}
 }
 
-func TestAffiliateLinkUsesDatabasePublisherWithoutEnvironmentVariable(t *testing.T) {
+func TestAffiliateShortLinkAcceptsDatabasePublisherWithoutEnvironmentVariable(t *testing.T) {
 	store, customer, admin := testStore(t)
+	configureLinkPolicy(t, store)
 	ctx := context.Background()
-	aff := &affiliate.Service{Store: store, Enabled: true, TrackingVerified: true, Publisher: "legacy-fallback"}
+	aff := &affiliate.Service{Store: store, Enabled: true, TrackingVerified: true, LinkGenerator: &offerLinkFixture{}}
 	if _, err := store.Pool.Exec(ctx, `UPDATE affiliate_channels SET status='available',settings='{"template":"https://s.shopee.vn/an_redir"}' WHERE id='shopee'`); err != nil {
 		t.Fatal(err)
 	}
@@ -114,9 +114,8 @@ func TestAffiliateLinkUsesDatabasePublisherWithoutEnvironmentVariable(t *testing
 		if err != nil {
 			t.Fatal(err)
 		}
-		u, err := url.Parse(result.(map[string]any)["affiliateUrl"].(string))
-		if err != nil || u.Query().Get("affiliate_id") != id {
-			t.Fatal("affiliate ID did not come from database", err)
+		if result.(map[string]any)["affiliateUrl"] != "https://s.shopee.vn/3B7ybQjO2E" {
+			t.Fatal("Shopee short URL not returned")
 		}
 	}
 }

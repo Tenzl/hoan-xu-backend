@@ -2,10 +2,13 @@ package orders
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/jackc/pgx/v5"
 	"hoanxu/internal/cashback"
 	"hoanxu/internal/platform"
+	"hoanxu/internal/tracking"
 	"hoanxu/internal/wallet"
+	"time"
 )
 
 type Service struct{ Store *platform.Store }
@@ -17,16 +20,54 @@ type Event struct {
 
 func (s *Service) Event(ctx context.Context, actor, id, key string, p Event) (any, error) {
 	return s.Store.Action(ctx, actor, key, "order-event:"+id, p, func(tx pgx.Tx) (any, error) {
+		var lockUser, lockCode string
+		if err := tx.QueryRow(ctx, `SELECT user_id::text,coalesce(tracking_code,'') FROM orders WHERE id=$1`, id).Scan(&lockUser, &lockCode); err != nil {
+			return nil, platform.Fail(404, "NOT_FOUND", "Không có đơn.")
+		}
+		if err := platform.LockTracking(ctx, tx, lockUser, lockCode); err != nil {
+			return nil, err
+		}
 		var user, status, sourceStatus string
 		var cash, commission int64
 		var bps int
-		e := tx.QueryRow(ctx, `SELECT user_id::text,status,cashback,commission,source_status,share_bps FROM orders WHERE id=$1 FOR UPDATE`, id).Scan(&user, &status, &cash, &commission, &sourceStatus, &bps)
+		var mode, publisher, policyID string
+
+		var issued, expires *time.Time
+		var at time.Time
+		var subIDs []byte
+		e := tx.QueryRow(ctx, `SELECT user_id::text,status,cashback,commission,source_status,share_bps,cashback_mode,publisher,ordered_at,link_created_at,link_expires_at,tracking_sub_ids,policy_id::text FROM orders WHERE id=$1 FOR UPDATE`, id).Scan(&user, &status, &cash, &commission, &sourceStatus, &bps, &mode, &publisher, &at, &issued, &expires, &subIDs, &policyID)
 		if e != nil {
 			return nil, platform.Fail(404, "NOT_FOUND", "Không có đơn.")
 		}
 		next := status
 		switch p.Action {
 		case "approved", "rejected":
+			if p.Action == "approved" && mode == "signed_link" {
+				var ids [5]string
+				if json.Unmarshal(subIDs, &ids) != nil {
+					return nil, platform.Fail(409, "INVALID_TRACKING", "Thiếu tracking đối soát.")
+				}
+				claims, err := tracking.Verify(ids, publisher, s.Store.SignTracking)
+				if err != nil || issued == nil || expires == nil || !claims.CreatedAt.Equal(*issued) || !claims.ExpiresAt().Equal(*expires) || !claims.Eligible(at) {
+					return nil, platform.Fail(409, "LINK_INELIGIBLE", "Đơn không đủ điều kiện thời hạn hoặc chữ ký hoàn Xu.")
+				}
+				var tax int
+				if err = tx.QueryRow(ctx, `SELECT tax_bps FROM cashback_policies WHERE tracking_version=$1 AND id=$2`, claims.Policy, policyID).Scan(&tax); err != nil {
+					return nil, err
+				}
+				effective, err := cashback.EffectiveRate(claims.Bps, tax)
+				expected, amountErr := cashback.AmountRoundedUp(commission, effective)
+				if err != nil || amountErr != nil || effective != bps || !tracking.MatchesFactor(ids[3], (cashback.LinkRate{EffectiveBps: effective}).Factor()) || expected != cash {
+					return nil, platform.Fail(409, "INVALID_TRACKING", "Tỷ lệ hoặc tiền hoàn không khớp đối soát.")
+				}
+				var matches bool
+				if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND tracking_code=$2 AND role='customer' AND NOT blocked)`, user, ids[0]).Scan(&matches); err != nil {
+					return nil, err
+				}
+				if !matches {
+					return nil, platform.Fail(409, "INVALID_CUSTOMER", "Khách đối soát không hợp lệ.")
+				}
+			}
 			if p.Action == "approved" && sourceStatus != "approved" {
 				return nil, platform.Fail(409, "SOURCE_NOT_APPROVED", "Báo cáo sàn chưa duyệt hoa hồng; chưa thể cộng ví.")
 			}
@@ -43,9 +84,12 @@ func (s *Service) Event(ctx context.Context, actor, id, key string, p Event) (an
 			if status != "approved" || p.Commission < 0 || p.Commission > 1e12 || !platform.Text(p.Reason, 3, 500) {
 				return nil, platform.Fail(422, "INVALID_ADJUSTMENT", "Điều chỉnh cần đơn đã duyệt, số hoa hồng hợp lệ và lý do.")
 			}
-			newCash, err := cashback.Amount(p.Commission, bps)
+			newCash, err := cashback.OrderAmount(p.Commission, bps, mode)
 			if err != nil {
 				return nil, err
+			}
+			if mode == "signed_link" && sourceStatus == "rejected" {
+				newCash = 0
 			}
 			delta := newCash - cash
 			if delta > 0 {

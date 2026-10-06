@@ -59,7 +59,7 @@ func TestTierBoundaries(t *testing.T) {
 	}
 }
 func TestPolicyValidationAndRequiredFields(t *testing.T) {
-	valid := Input{CurrentVersionID: "11111111-1111-4111-8111-111111111111", Tiers: []Tier{{"bronze", 0, 0, 10000}, {"platinum", 30, 5000, 5000}, {"diamond", 100, 8000, 9000}}}
+	valid := Input{CurrentVersionID: "11111111-1111-4111-8111-111111111111", Tax: 500, Tiers: []Tier{{"bronze", 0, 0, 10000}, {"platinum", 30, 5000, 5500}, {"diamond", 100, 8000, 9000}}}
 	if e := Validate(valid); e != nil {
 		t.Fatal(e)
 	}

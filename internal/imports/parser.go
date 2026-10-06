@@ -11,17 +11,24 @@ import (
 )
 
 type Row struct {
-	Channel    string    `json:"channel"`
-	Publisher  string    `json:"publisher"`
-	OrderID    string    `json:"orderId"`
-	LineID     string    `json:"lineId"`
-	Tracking   string    `json:"trackingCode"`
-	Date       time.Time `json:"date"`
-	Name       string    `json:"productName"`
-	Value      int64     `json:"value"`
-	Commission int64     `json:"commission"`
-	Status     string    `json:"status"`
-	Error      string    `json:"error,omitempty"`
+	NativeShopee bool      `json:"nativeShopee,omitempty"`
+	SubIDs       [5]string `json:"subIds,omitempty"`
+	ShopID       string    `json:"shopId,omitempty"`
+	ItemID       string    `json:"itemId,omitempty"`
+	ConversionID string    `json:"conversionId,omitempty"`
+	ModelID      string    `json:"modelId,omitempty"`
+	PromotionID  string    `json:"promotionId,omitempty"`
+	Channel      string    `json:"channel"`
+	Publisher    string    `json:"publisher"`
+	OrderID      string    `json:"orderId"`
+	LineID       string    `json:"lineId"`
+	Tracking     string    `json:"trackingCode"`
+	Date         time.Time `json:"date"`
+	Name         string    `json:"productName"`
+	Value        int64     `json:"value"`
+	Commission   int64     `json:"commission"`
+	Status       string    `json:"status"`
+	Error        string    `json:"error,omitempty"`
 }
 
 var fields = []string{"channel", "publisher", "order_id", "line_id", "tracking_code", "date", "product_name", "value", "commission", "status"}
@@ -45,6 +52,11 @@ func Parse(reader io.Reader, mapping map[string]string) ([]Row, error) {
 	header, e := r.Read()
 	if e != nil {
 		return nil, e
+	}
+	for _, h := range header {
+		if strings.TrimSpace(h) == "Order id" {
+			return parseShopee(r, header)
+		}
 	}
 	indices := map[string]int{}
 	for _, f := range fields {

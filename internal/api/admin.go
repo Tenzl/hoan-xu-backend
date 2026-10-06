@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"hoanxu/internal/auth"
@@ -537,58 +538,58 @@ func (s *Server) previewCSV(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) manualOrder(w http.ResponseWriter, r *http.Request) {
 	var p struct {
-		Tracking    string `json:"trackingCode"`
-		Channel     string `json:"channel"`
-		Publisher   string `json:"publisher"`
-		ExternalID  string `json:"externalId"`
-		LineID      string `json:"lineId"`
-		ProductName string `json:"productName"`
-		Value       int64  `json:"value"`
-		Commission  int64  `json:"commission"`
-		Evidence    string `json:"evidence"`
+		Tracking     string    `json:"trackingCode"`
+		Channel      string    `json:"channel"`
+		Publisher    string    `json:"publisher"`
+		ExternalID   string    `json:"externalId"`
+		LineID       string    `json:"lineId"`
+		ProductName  string    `json:"productName"`
+		Value        int64     `json:"value"`
+		Commission   int64     `json:"commission"`
+		Evidence     string    `json:"evidence"`
+		SubIDs       [5]string `json:"subIds"`
+		ShopID       string    `json:"shopId"`
+		ItemID       string    `json:"itemId"`
+		ConversionID string    `json:"conversionId"`
+		ModelID      string    `json:"modelId"`
+		PromotionID  string    `json:"promotionId"`
+		OrderedAt    time.Time `json:"orderedAt"`
 	}
 	if !s.body(w, r, &p) {
 		return
 	}
-	if !platform.Text(p.ProductName, 1, 200) || !platform.Text(p.Publisher, 1, 100) || !platform.Text(p.ExternalID, 1, 100) || !platform.Text(p.LineID, 1, 100) || !platform.Text(p.Evidence, 3, 500) || p.Value < 0 || p.Commission < 0 || p.Value > 1e12 || p.Commission > 1e12 {
-		s.reply(w, r, 0, nil, platform.Fail(422, "VALIDATION_ERROR", "Thiếu nguồn/bằng chứng hoặc số tiền không hợp lệ."))
+	if !platform.Text(p.ProductName, 1, 200) || !platform.Text(p.Evidence, 3, 500) || p.Channel != "shopee" || p.Value < 0 || p.Value > 1e12 || p.Commission < 0 || p.Commission > 1e12 || p.OrderedAt.IsZero() {
+		s.reply(w, r, 0, nil, platform.Fail(422, "SIGNED_REPORT_REQUIRED", "Cần đủ ID nguồn Shopee, Sub_id1–5, giờ đặt đơn và bằng chứng."))
 		return
 	}
+	row := imports.Row{NativeShopee: true, Channel: p.Channel, Publisher: p.Publisher, OrderID: p.ExternalID, Tracking: p.Tracking, Name: p.ProductName, Value: p.Value, Commission: p.Commission, SubIDs: p.SubIDs, ShopID: p.ShopID, ItemID: p.ItemID, ConversionID: p.ConversionID, ModelID: p.ModelID, PromotionID: p.PromotionID, Date: p.OrderedAt, Status: "approved"}
+	line, e := imports.SourceLineID(row)
+	if e != nil {
+		s.reply(w, r, 0, nil, platform.Fail(422, "INVALID_SOURCE_ID", e.Error()))
+		return
+	}
+	row.LineID = line
 	v, e := s.Store.Action(r.Context(), user(r).ID, r.Header.Get("Idempotency-Key"), "manual-order", p, func(tx pgx.Tx) (any, error) {
-		var id, owner, link, policy string
-		var tier *string
-		var minBps, maxBps int
-		e := tx.QueryRow(r.Context(), `SELECT user_id::text,id::text,policy_id::text,tier_code,min_share_bps,max_share_bps FROM affiliate_links WHERE tracking_code=$1 AND channel=$2`, p.Tracking, p.Channel).Scan(&owner, &link, &policy, &tier, &minBps, &maxBps)
-		if e == pgx.ErrNoRows {
-			return nil, platform.Fail(422, "TRACKING_NOT_FOUND", "Không tìm thấy tracking đúng kênh.")
-		}
+		a, e := imports.Attribute(r.Context(), tx, s.Store, &row)
 		if e != nil {
-			return nil, platform.Conflict(e)
-		}
-		if e = cashback.LockOrder(r.Context(), tx, p.Channel, p.Publisher, p.ExternalID, p.LineID); e != nil {
+			var invalid *imports.Ineligible
+			if errors.As(e, &invalid) {
+				return nil, platform.Fail(422, "INVALID_TRACKING", e.Error())
+			}
 			return nil, e
 		}
-		var exists bool
-		if e = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM orders WHERE channel=$1 AND publisher=$2 AND external_id=$3 AND line_id=$4)`, p.Channel, p.Publisher, p.ExternalID, p.LineID).Scan(&exists); e != nil {
+		if e := platform.LockTracking(r.Context(), tx, a.User, row.Tracking); e != nil {
 			return nil, e
 		}
-		if exists {
-			return nil, platform.Fail(409, "CONFLICT", "Dữ liệu đã tồn tại.")
-		}
-		bps, e := cashback.Sample(nil, minBps, maxBps)
-		if e != nil {
+		if e := cashback.LockOrder(r.Context(), tx, row.Channel, row.Publisher, row.OrderID, row.LineID); e != nil {
 			return nil, e
 		}
-		cash, e := cashback.Amount(p.Commission, bps)
-		if e != nil {
-			return nil, e
-		}
-		e = tx.QueryRow(r.Context(), `INSERT INTO orders(user_id,link_id,policy_id,channel,publisher,external_id,line_id,product_name,value,commission,cashback,ordered_at,source_status,tier_code,share_bps) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now(),'approved',$12,$13) RETURNING id::text`, owner, link, policy, p.Channel, p.Publisher, p.ExternalID, p.LineID, p.ProductName, p.Value, p.Commission, cash, tier, bps).Scan(&id)
+		id, cash, e := imports.InsertSignedOrder(r.Context(), tx, s.Store, &row)
 		if e != nil {
 			return nil, platform.Conflict(e)
 		}
 		e = platform.Audit(r.Context(), tx, user(r).ID, "manual_order", id, p)
-		return map[string]any{"id": id, "tierCode": tier, "sharePercent": cashback.Percent(bps), "cashback": cash}, e
+		return map[string]any{"id": id, "cashback": cash}, e
 	})
 	s.reply(w, r, 201, v, e)
 }
@@ -610,14 +611,27 @@ func (s *Server) resolveRow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
+	// Resolution is only allowed against an existing legacy order; signed native rows cannot be rewritten.
+	var payload []byte
+	e = tx.QueryRow(r.Context(), `SELECT payload FROM import_rows WHERE batch_id=$1 AND row_number=$2 AND status='unmatched' FOR UPDATE`, chi.URLParam(r, "id"), chi.URLParam(r, "number")).Scan(&payload)
+	var row imports.Row
+	if e == nil {
+		e = json.Unmarshal(payload, &row)
+	}
+	if e == nil && row.NativeShopee {
+		e = platform.Fail(422, "SIGNED_REPORT_REQUIRED", "Không thể sửa Sub_id của báo cáo đã ký.")
+	}
 	var exists bool
-	e = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM affiliate_links WHERE tracking_code=$1)`, p.TrackingCode).Scan(&exists)
+	if e == nil {
+		e = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM orders o LEFT JOIN affiliate_links l ON l.id=o.link_id WHERE o.channel=$1 AND o.publisher=$2 AND o.external_id=$3 AND o.line_id=$4 AND coalesce(o.tracking_code,l.tracking_code)=$5 AND o.cashback_mode='commission_share')`, row.Channel, row.Publisher, row.OrderID, row.LineID, p.TrackingCode).Scan(&exists)
+	}
 	if e == nil && !exists {
-		e = platform.Fail(422, "TRACKING_NOT_FOUND", "Tracking không có trong hệ thống.")
+		e = platform.Fail(422, "TRACKING_NOT_FOUND", "Mã link cũ chỉ cập nhật được đơn đã tồn tại.")
 	}
 	if e == nil {
-		_, e = tx.Exec(r.Context(), `UPDATE import_rows SET payload=jsonb_set(payload,'{trackingCode}',to_jsonb($3::text)),status='valid',error=NULL WHERE batch_id=$1 AND row_number=$2 AND status='unmatched'`, chi.URLParam(r, "id"), chi.URLParam(r, "number"), p.TrackingCode)
+		_, e = tx.Exec(r.Context(), `UPDATE import_rows SET payload=jsonb_set(payload,'{trackingCode}',to_jsonb($3::text)),status='valid',error=NULL WHERE batch_id=$1 AND row_number=$2`, chi.URLParam(r, "id"), chi.URLParam(r, "number"), p.TrackingCode)
 	}
+
 	if e == nil {
 		_, e = tx.Exec(r.Context(), `UPDATE import_batches SET status='queued' WHERE id=$1 AND status='completed'`, chi.URLParam(r, "id"))
 	}

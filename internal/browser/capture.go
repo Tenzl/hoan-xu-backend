@@ -33,6 +33,10 @@ func (m *Manager) capture(lifetime, request context.Context, item string) ([]byt
 }
 
 func (m *Manager) captureAttempt(lifetime, request context.Context, item string, attempt int) (body []byte, captureErr error) {
+	return m.captureAttemptWithLink(lifetime, request, item, attempt, nil)
+}
+
+func (m *Manager) captureAttemptWithLink(lifetime, request context.Context, item string, attempt int, link *offerLinkRequest) (body []byte, captureErr error) {
 	started := time.Now()
 	leaseCtx, stopLease := context.WithTimeout(request, 20*time.Second)
 	defer stopLease()
@@ -366,6 +370,17 @@ func (m *Manager) captureAttempt(lifetime, request context.Context, item string,
 			}
 			if !validProductBody(body, item) {
 				return nil, failure("SHOPEE_RESPONSE_INVALID", "schema", false)
+			}
+			if link != nil {
+				phase = "offer_link"
+				body, err = m.fetchOfferLink(scope, *link)
+				if err != nil {
+					var f *Failure
+					if errors.As(err, &f) {
+						return nil, m.sessionFailure(f)
+					}
+					return nil, err
+				}
 			}
 			keep = true
 			phase = "complete"

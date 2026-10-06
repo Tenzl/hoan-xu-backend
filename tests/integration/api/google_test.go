@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"testing"
 	"time"
 
@@ -103,6 +104,9 @@ func TestGoogleIdentityClaimsAndAccountIsolation(t *testing.T) {
 	if e != nil || customer.Role != "customer" || customer.ID == admin {
 		t.Fatal(customer, e)
 	}
+	if !regexp.MustCompile(`^[a-f0-9]{20}$`).MatchString(customer.Tracking) {
+		t.Fatal("first Google login did not create a personal tracking code")
+	}
 	var balance, coins int64
 	e = store.Pool.QueryRow(ctx, `SELECT (SELECT sum(balance) FROM wallet_accounts WHERE user_id=$1),(SELECT balance FROM coin_accounts WHERE user_id=$1)`, customer.ID).Scan(&balance, &coins)
 	if e != nil || balance != 0 || coins != 0 {
@@ -118,8 +122,18 @@ func TestGoogleIdentityClaimsAndAccountIsolation(t *testing.T) {
 		t.Fatal(e)
 	}
 	same, e := svc.Session(ctx, token)
-	if e != nil || same.ID != customer.ID {
+	if e != nil || same.ID != customer.ID || same.Tracking != customer.Tracking {
 		t.Fatal("subject did not retain identity", same, e)
+	}
+	state, claims = start()
+	claims["sub"] = "another-google-subject"
+	token, e = finish(state, claims)
+	if e != nil {
+		t.Fatal(e)
+	}
+	other, e := svc.Session(ctx, token)
+	if e != nil || other.ID == customer.ID || other.Tracking == customer.Tracking || other.Tracking == "" {
+		t.Fatal("different Google customers did not receive separate tracking codes", e)
 	}
 	_, e = store.Pool.Exec(ctx, `UPDATE users SET blocked=true WHERE id=$1`, customer.ID)
 	if e != nil {

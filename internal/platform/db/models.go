@@ -49,11 +49,19 @@ type AuthIdentity struct {
 	UserID  pgtype.UUID
 }
 
+type BrowserCredential struct {
+	Provider     string
+	CookieCipher string
+	UpdatedAt    pgtype.Timestamptz
+}
+
 type CashbackPolicy struct {
-	ID           pgtype.UUID
-	SharePercent pgtype.Numeric
-	CreatedAt    pgtype.Timestamptz
-	Mode         string
+	ID              pgtype.UUID
+	SharePercent    pgtype.Numeric
+	CreatedAt       pgtype.Timestamptz
+	Mode            string
+	TrackingVersion pgtype.Int8
+	TaxBps          int32
 }
 
 type CashbackTier struct {
@@ -187,25 +195,31 @@ type OauthRequest struct {
 }
 
 type Order struct {
-	ID           pgtype.UUID
-	UserID       pgtype.UUID
-	LinkID       pgtype.UUID
-	PolicyID     pgtype.UUID
-	Channel      string
-	Publisher    string
-	ExternalID   string
-	LineID       string
-	ProductName  string
-	Value        int64
-	Commission   int64
-	Cashback     int64
-	Status       string
-	OrderedAt    pgtype.Timestamptz
-	CreatedAt    pgtype.Timestamptz
-	SourceStatus string
-	ApprovedAt   pgtype.Timestamptz
-	TierCode     pgtype.Text
-	ShareBps     int32
+	ID               pgtype.UUID
+	UserID           pgtype.UUID
+	LinkID           pgtype.UUID
+	PolicyID         pgtype.UUID
+	Channel          string
+	Publisher        string
+	ExternalID       string
+	LineID           string
+	ProductName      string
+	Value            int64
+	Commission       int64
+	Cashback         int64
+	Status           string
+	OrderedAt        pgtype.Timestamptz
+	CreatedAt        pgtype.Timestamptz
+	SourceStatus     string
+	ApprovedAt       pgtype.Timestamptz
+	TierCode         pgtype.Text
+	ShareBps         int32
+	TrackingCode     pgtype.Text
+	TrackingSubIds   []byte
+	LinkCreatedAt    pgtype.Timestamptz
+	LinkExpiresAt    pgtype.Timestamptz
+	PromisedCashback pgtype.Int8
+	CashbackMode     string
 }
 
 type OrderEvent struct {

@@ -11,6 +11,8 @@ import (
 	"hoanxu/internal/affiliate"
 	"hoanxu/internal/auth"
 	"hoanxu/internal/settings"
+	"hoanxu/internal/tracking"
+	"time"
 )
 
 func TestFAQIsValidatedAndPreservedAcrossPolicyUpdates(t *testing.T) {
@@ -96,7 +98,25 @@ func TestAllReadRoutesAndManualOrderAgainstPostgreSQL(t *testing.T) {
 	if _, e := store.Pool.Exec(ctx, `INSERT INTO affiliate_links(user_id,channel,original_url,affiliate_url,tracking_code,policy_id) SELECT $1,'shopee','https://shopee.vn/product/1/2','https://s.shopee.vn/test','manualtracking',id FROM cashback_policies WHERE mode='fixed'`, customer); e != nil {
 		t.Fatal(e)
 	}
-	body := `{"trackingCode":"manualtracking","channel":"shopee","publisher":"test","externalId":"manual-one","lineId":"one","productName":"Manual order","value":100000,"commission":5000,"evidence":"Approved platform report"}`
+	configureLinkPolicy(t, store)
+	if _, e := store.Pool.Exec(ctx, `UPDATE affiliate_channels SET settings='{"publisher":"123456789"}' WHERE id='shopee'`); e != nil {
+		t.Fatal(e)
+	}
+	var code string
+	var version uint32
+	if e := store.Pool.QueryRow(ctx, `SELECT tracking_code FROM users WHERE id=$1`, customer).Scan(&code); e != nil {
+		t.Fatal(e)
+	}
+	if e := store.Pool.QueryRow(ctx, `SELECT tracking_version FROM cashback_policies WHERE mode='tiered' ORDER BY created_at DESC LIMIT 1`).Scan(&version); e != nil {
+		t.Fatal(e)
+	}
+	at := time.Now().UTC().Truncate(time.Second)
+	ids, e := tracking.Issue(tracking.Claims{CreatedAt: at, Shop: 1, Item: 2, Policy: version, Tier: "bronze", Bps: 6600}, code, "123456789", "0.63", store.SignTracking)
+	if e != nil {
+		t.Fatal(e)
+	}
+	raw, _ := json.Marshal(map[string]any{"trackingCode": ids[2], "channel": "shopee", "publisher": "123456789", "externalId": "MANUAL1", "lineId": "ignored", "productName": "Manual order", "value": 100000, "commission": 5000, "evidence": "Approved platform report", "subIds": ids, "shopId": "1", "itemId": "2", "conversionId": "12345", "modelId": "0", "promotionId": "0", "orderedAt": at.Add(time.Second)})
+	body := string(raw)
 	w := request("POST", "/admin/orders", body, adminToken, adminUser.CSRF)
 	if w.Code != 201 {
 		t.Fatal(w.Code, w.Body.String())

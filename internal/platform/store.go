@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -29,9 +30,10 @@ func (e *Error) Error() string                    { return e.Message }
 func Fail(status int, code, message string) error { return &Error{status, code, message} }
 
 type Store struct {
-	Pool    *pgxpool.Pool
-	Cipher  cipher.AEAD
-	Queries *db.Queries
+	Pool        *pgxpool.Pool
+	Cipher      cipher.AEAD
+	Queries     *db.Queries
+	trackingKey []byte
 }
 
 func New(pool *pgxpool.Pool, key string) (*Store, error) {
@@ -44,7 +46,20 @@ func New(pool *pgxpool.Pool, key string) (*Store, error) {
 		return nil, e
 	}
 	a, e := cipher.NewGCM(block)
-	return &Store{Pool: pool, Cipher: a, Queries: db.New(pool)}, e
+	h := hmac.New(sha256.New, raw)
+	h.Write([]byte("hoanxu:cashback-link-signing:v1"))
+	return &Store{Pool: pool, Cipher: a, Queries: db.New(pool), trackingKey: h.Sum(nil)}, e
+}
+
+// SignTracking binds the publisher and all four claims using an unambiguous encoding.
+func (s *Store) SignTracking(publisher string, ids [4]string) string {
+	b, _ := json.Marshal(struct {
+		Publisher string
+		SubIDs    [4]string
+	}{publisher, ids})
+	h := hmac.New(sha256.New, s.trackingKey)
+	h.Write(b)
+	return hex.EncodeToString(h.Sum(nil)[:16])
 }
 func Token() string {
 	b := make([]byte, 32)

@@ -78,17 +78,20 @@ type Policy struct {
 	ID        string    `json:"id"`
 	CreatedAt time.Time `json:"createdAt"`
 	Tiers     []Tier    `json:"tiers"`
+	Tax       Percent   `json:"taxPercent"`
 }
 type Input struct {
-	CurrentVersionID string `json:"currentVersionId"`
-	Tiers            []Tier `json:"tiers"`
+	CurrentVersionID string  `json:"currentVersionId"`
+	Tiers            []Tier  `json:"tiers"`
+	Tax              Percent `json:"taxPercent"`
 }
 type Membership struct {
 	PolicyID string `json:"policyId"`
 	Tier
-	ApprovedOrders int64 `json:"approvedOrders"`
-	NextTier       *Tier `json:"nextTier"`
-	OrdersToNext   int64 `json:"ordersToNext"`
+	Tax            Percent `json:"-"`
+	ApprovedOrders int64   `json:"approvedOrders"`
+	NextTier       *Tier   `json:"nextTier"`
+	OrdersToNext   int64   `json:"ordersToNext"`
 }
 type Service struct{ Store *platform.Store }
 
@@ -102,7 +105,7 @@ func Current(ctx context.Context, q *db.Queries) (*Policy, error) {
 	if e != nil {
 		return nil, e
 	}
-	p := &Policy{ID: row.ID, CreatedAt: row.CreatedAt.Time, Tiers: []Tier{}}
+	p := &Policy{ID: row.ID, CreatedAt: row.CreatedAt.Time, Tiers: []Tier{}, Tax: Percent(row.TaxBps)}
 	for _, t := range tiers {
 		p.Tiers = append(p.Tiers, Tier{t.TierCode, t.MinApprovedOrders, Percent(t.MinShareBps), Percent(t.MaxShareBps)})
 	}
@@ -112,7 +115,7 @@ func Current(ctx context.Context, q *db.Queries) (*Policy, error) {
 	return p, nil
 }
 func Select(p *Policy, count int64) Membership {
-	m := Membership{PolicyID: p.ID, Tier: p.Tiers[0], ApprovedOrders: count}
+	m := Membership{PolicyID: p.ID, Tier: p.Tiers[0], Tax: p.Tax, ApprovedOrders: count}
 	for i, t := range p.Tiers {
 		if count >= t.MinOrders {
 			m.Tier = t
@@ -139,11 +142,17 @@ func Validate(p Input) error {
 	if !platform.ID(p.CurrentVersionID) || len(p.Tiers) != 3 {
 		return platform.Fail(422, "INVALID_CASHBACK_POLICY", "Cần đủ ba hạng và phiên bản chính sách hợp lệ.")
 	}
+	if p.Tax < 0 || p.Tax > 10000 {
+		return platform.Fail(422, "INVALID_CASHBACK_POLICY", "Phần trăm thuế phải từ 0–100%, tối đa hai chữ số thập phân.")
+	}
 	codes := []string{"bronze", "platinum", "diamond"}
 	var last int64 = -1
 	for i, t := range p.Tiers {
 		if t.Code != codes[i] || t.MinOrders <= last || t.MinOrders > 1000000000 || (i == 0 && t.MinOrders != 0) || t.Min < 0 || t.Max > 10000 || t.Min > t.Max {
 			return platform.Fail(422, "INVALID_CASHBACK_POLICY", "Ngưỡng hạng phải tăng dần; tỷ lệ từ 0–100%, tối thiểu không vượt tối đa.")
+		}
+		if e := ValidateLinkRange(int(t.Min), int(t.Max)); e != nil {
+			return platform.Fail(422, "INVALID_CASHBACK_POLICY", "Tỷ lệ phải là số nguyên; tối đa cao hơn tối thiểu ít nhất 5 điểm phần trăm.")
 		}
 		last = t.MinOrders
 	}
@@ -166,7 +175,7 @@ func (s *Service) Create(ctx context.Context, actor, key string, p Input) (any, 
 			return nil, platform.Fail(409, "POLICY_VERSION_CONFLICT", "Chính sách đã thay đổi. Tải lại cấu hình trước khi lưu.")
 		}
 		var id string
-		if e = tx.QueryRow(ctx, `INSERT INTO cashback_policies(share_percent,mode,created_at) VALUES($1::numeric/100,'tiered',clock_timestamp()) RETURNING id::text`, int(p.Tiers[0].Min)).Scan(&id); e != nil {
+		if e = tx.QueryRow(ctx, `INSERT INTO cashback_policies(share_percent,mode,created_at,tax_bps) VALUES($1::numeric/100,'tiered',clock_timestamp(),$2) RETURNING id::text`, int(p.Tiers[0].Min), int(p.Tax)).Scan(&id); e != nil {
 			return nil, e
 		}
 		for _, t := range p.Tiers {

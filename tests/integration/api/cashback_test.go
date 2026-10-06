@@ -66,7 +66,7 @@ func TestTierMigrationPreservesLegacyMoney(t *testing.T) {
 	}
 }
 
-func TestLinkSnapshotAndCSVDrawSurvivePolicyChangesRetriesAndAdjustment(t *testing.T) {
+func TestLegacyOrderSnapshotSurvivesPolicyChangesRetriesAndAdjustment(t *testing.T) {
 	s, customer, admin := testStore(t)
 	ctx := context.Background()
 	policies := &cashback.Service{Store: s}
@@ -74,22 +74,24 @@ func TestLinkSnapshotAndCSVDrawSurvivePolicyChangesRetriesAndAdjustment(t *testi
 	if e != nil {
 		t.Fatal(e)
 	}
-	initial := cashback.Input{CurrentVersionID: p.ID, Tiers: []cashback.Tier{{Code: "bronze", MinOrders: 0, Min: 2222, Max: 2224}, {Code: "platinum", MinOrders: 2, Min: 6000, Max: 7000}, {Code: "diamond", MinOrders: 4, Min: 8000, Max: 9000}}}
+	initial := cashback.Input{CurrentVersionID: p.ID, Tiers: []cashback.Tier{{Code: "bronze", MinOrders: 0, Min: 2200, Max: 2700}, {Code: "platinum", MinOrders: 2, Min: 6000, Max: 7000}, {Code: "diamond", MinOrders: 4, Min: 8000, Max: 9000}}}
 	if _, e = policies.Create(ctx, admin, "policy-initial", initial); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = s.Pool.Exec(ctx, `UPDATE affiliate_channels SET status='available',settings='{"template":"https://s.shopee.vn/an_redir"}' WHERE id='shopee'`); e != nil {
 		t.Fatal(e)
 	}
-	aff := &affiliate.Service{Store: s, Enabled: true, TrackingVerified: true, Publisher: "fixture"}
-	result, e := aff.CreateLink(ctx, customer, "https://shopee.vn/product/1/2")
-	if e != nil {
+	var linkID, policyID string
+	if e = s.Pool.QueryRow(ctx, `SELECT id::text FROM cashback_policies WHERE mode='tiered' ORDER BY created_at DESC LIMIT 1`).Scan(&policyID); e != nil {
 		t.Fatal(e)
 	}
-	l := result.(map[string]any)
-	if l["tierCode"] != "bronze" || l["minSharePercent"] != cashback.Percent(2222) {
-		t.Fatal(l)
+	if e = s.Pool.QueryRow(ctx, `INSERT INTO affiliate_links(user_id,channel,original_url,affiliate_url,tracking_code,policy_id,tier_code,min_share_bps,max_share_bps) VALUES($1,'shopee','https://shopee.vn/product/1/2','https://s.shopee.vn/legacy','legacy-rate-link',$2,'bronze',2222,2224) RETURNING id::text`, customer, policyID).Scan(&linkID); e != nil {
+		t.Fatal(e)
 	}
+	if _, e = s.Pool.Exec(ctx, `INSERT INTO orders(user_id,link_id,policy_id,channel,publisher,external_id,line_id,product_name,value,commission,cashback,ordered_at,source_status,tier_code,share_bps) VALUES($1,$2,$3,'shopee','fixture','random-one','line','Test',100000,10001,2223,now(),'approved','bronze',2223)`, customer, linkID, policyID); e != nil {
+		t.Fatal(e)
+	}
+	l := map[string]any{"trackingCode": "legacy-rate-link"}
 	// Pending and rejected rows cannot raise the customer's tier.
 	if _, e = s.Pool.Exec(ctx, `INSERT INTO orders(user_id,policy_id,channel,publisher,external_id,line_id,product_name,value,commission,cashback,ordered_at,status) SELECT $1,p.id,'shopee','rank',n::text,'line','Rank',0,0,0,now(),CASE WHEN n%2=0 THEN 'pending' ELSE 'rejected' END FROM cashback_policies p CROSS JOIN generate_series(1,8)n WHERE p.mode='fixed'`, customer); e != nil {
 		t.Fatal(e)
@@ -109,7 +111,7 @@ func TestLinkSnapshotAndCSVDrawSurvivePolicyChangesRetriesAndAdjustment(t *testi
 	if e != nil {
 		t.Fatal(e)
 	}
-	changed := cashback.Input{CurrentVersionID: p.ID, Tiers: []cashback.Tier{{Code: "bronze", MinOrders: 0, Min: 9900, Max: 9900}, {Code: "platinum", MinOrders: 2, Min: 9900, Max: 9900}, {Code: "diamond", MinOrders: 4, Min: 9900, Max: 9900}}}
+	changed := cashback.Input{CurrentVersionID: p.ID, Tiers: []cashback.Tier{{Code: "bronze", MinOrders: 0, Min: 8000, Max: 9000}, {Code: "platinum", MinOrders: 2, Min: 8000, Max: 9000}, {Code: "diamond", MinOrders: 4, Min: 8000, Max: 9000}}}
 	if _, e = policies.Create(ctx, admin, "policy-changed", changed); e != nil {
 		t.Fatal(e)
 	}
@@ -330,7 +332,7 @@ func TestCashbackPolicyAPIRequiresPermissionReauthAndPreservesOtherSettings(t *t
 	if e != nil {
 		t.Fatal(e)
 	}
-	input := cashback.Input{CurrentVersionID: p.ID, Tiers: []cashback.Tier{{Code: "bronze", Min: 5001, Max: 5502}, {Code: "platinum", MinOrders: 30, Min: 6000, Max: 7000}, {Code: "diamond", MinOrders: 100, Min: 8000, Max: 9000}}}
+	input := cashback.Input{CurrentVersionID: p.ID, Tiers: []cashback.Tier{{Code: "bronze", Min: 5000, Max: 5500}, {Code: "platinum", MinOrders: 30, Min: 6000, Max: 7000}, {Code: "diamond", MinOrders: 100, Min: 8000, Max: 9000}}}
 	raw, _ := json.Marshal(input)
 	for _, tc := range []struct {
 		token, csrf string
@@ -358,7 +360,7 @@ func TestCashbackPolicyAPIRequiresPermissionReauthAndPreservesOtherSettings(t *t
 	if stale := request("POST", "/admin/cashback-policies", string(raw), adminToken, au.CSRF, "policy-stale-key"); stale.Code != 409 {
 		t.Fatal(stale.Code, stale.Body.String())
 	}
-	bad := strings.Replace(string(raw), "50.01", "50.001", 1)
+	bad := strings.Replace(string(raw), "50.00", "50.001", 1)
 	if invalid := request("POST", "/admin/cashback-policies", bad, adminToken, au.CSRF, "policy-bad-key"); invalid.Code != 422 {
 		t.Fatal(invalid.Code, invalid.Body.String())
 	}
@@ -397,22 +399,12 @@ func TestCashbackPolicyAPIRequiresPermissionReauthAndPreservesOtherSettings(t *t
 		t.Fatal(e)
 	}
 	manual := `{"trackingCode":"manual-random","channel":"shopee","publisher":"fixture","externalId":"manual-one","lineId":"line","productName":"Manual","value":100000,"commission":10001,"evidence":"Test evidence"}`
-	for i := 0; i < 2; i++ {
-		w := request("POST", "/admin/orders", manual, adminToken, au.CSRF, "manual-random-key")
-		if w.Code != 201 {
-			t.Fatal(w.Code, w.Body.String())
-		}
+	if w := request("POST", "/admin/orders", manual, adminToken, au.CSRF, "manual-legacy-denied"); w.Code != 422 {
+		t.Fatal("old tracking created a new order", w.Code, w.Body.String())
 	}
-	var count, bps int
-	var cash int64
-	if e = s.Pool.QueryRow(ctx, `SELECT count(*),min(share_bps),min(cashback) FROM orders WHERE publisher='fixture'`).Scan(&count, &bps, &cash); e != nil {
-		t.Fatal(e)
+	var count int
+	if e = s.Pool.QueryRow(ctx, `SELECT count(*) FROM orders WHERE publisher='fixture'`).Scan(&count); e != nil || count != 0 {
+		t.Fatal(count, e)
 	}
-	expected, _ := cashback.Amount(10001, bps)
-	if count != 1 || bps < 5001 || bps > 5502 || cash != expected {
-		t.Fatal(count, bps, cash)
-	}
-	if conflict := request("POST", "/admin/orders", manual, adminToken, au.CSRF, "manual-random-other"); conflict.Code != 409 {
-		t.Fatal(conflict.Code)
-	}
+
 }

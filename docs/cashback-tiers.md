@@ -1,21 +1,29 @@
 # Ba hạng và tỷ lệ hoàn tiền
 
-Khách tự lên hạng theo số bản ghi đơn đã được duyệt nội bộ: Đồng (`bronze`), Bạch kim (`platinum`), Kim cương (`diamond`). Chỉ trạng thái `approved` được tính. Đây là cùng đơn vị đếm `orders` của hệ thống; khóa đơn/dòng nguồn gồm kênh, publisher, mã đơn và mã dòng.
+Khách lên hạng theo số bản ghi đơn đã được duyệt nội bộ (`approved`): Đồng (`bronze`), Bạch kim (`platinum`), Kim cương (`diamond`). Đơn đang chờ hoặc bị từ chối không nâng hạng.
 
-## Cấu hình
+## Cấu hình quản trị
 
-Mở `/admin/settings`, nhập ngưỡng đơn và khoảng phần trăm của ba hạng, xem trước rồi lưu. Đồng luôn bắt đầu từ 0; ngưỡng hai hạng sau tăng dần. Mỗi khoảng nằm trong 0–100%, có tối đa hai chữ số thập phân và được phép giao với khoảng hạng khác. Mặc định ngưỡng 0/30/100 và cả ba khoảng bằng tỷ lệ cũ khi migration, hiện 50–50%.
+Mở `/admin/settings`, nhập ngưỡng đơn, khoảng tỷ lệ nguyên của ba hạng và phần trăm thuế nội bộ. Đồng bắt đầu từ 0; ngưỡng hai hạng sau tăng dần. Mỗi khoảng nằm trong 0–100%, tối đa cao hơn tối thiểu ít nhất 5 điểm phần trăm. Thuế mặc định 5%, cho phép 0–100% với tối đa hai chữ số thập phân.
 
-API `GET /api/v1/admin/cashback-policies/current` trả phiên bản hiện tại. `POST /api/v1/admin/cashback-policies` nhận `currentVersionId` và `tiers`, trả 201. Mỗi hạng có `tierCode`, `minApprovedOrders`, `minSharePercent`, `maxSharePercent`. Cần quyền settings, CSRF, xác thực mật khẩu trong 15 phút và Idempotency-Key. Phiên bản cũ trả 409 để người quản trị tải lại; cùng key/payload trả cùng kết quả. Cài đặt chung và FAQ không còn điều chỉnh mức chia.
+`GET /api/v1/admin/cashback-policies/current` trả phiên bản và `taxPercent`. `POST /api/v1/admin/cashback-policies` nhận `currentVersionId`, `taxPercent`, `tiers`; trả 201. Giữ quyền settings, CSRF, xác thực mật khẩu gần đây, Idempotency-Key và kiểm tra xung đột phiên bản. Thuế không xuất hiện trên giao diện hoặc response API khách hàng.
 
-## Chốt tỷ lệ
+## Chốt hệ số
 
-Tạo link chụp phiên bản, hạng và min/max tại lúc tạo. Mỗi đơn phát sinh từ link chọn ngẫu nhiên một tỷ lệ ở lần ghi nhận đầu, lưu cùng transaction tạo đơn. Dùng crypto/rand, phân phối đều trên các basis point và bao gồm hai đầu khoảng; min=max trả tỷ lệ cố định. Một basis point bằng 0,01%.
+Mỗi yêu cầu tạo link chụp phiên bản chính sách, hạng và thuế trước khi liên hệ Shopee. Dùng crypto/rand chọn đều một số nguyên phần trăm trong khoảng, bao gồm hai đầu. Trúng tối thiểu cộng 1 điểm phần trăm; trúng tối đa trừ 4; kết quả giữa giữ nguyên. Chỉ điều chỉnh một lần.
 
-`cashback = commission × shareBps / 10000`, chia số nguyên và làm tròn xuống đồng. Commission lấy từ báo cáo thực nhận, không dùng số checker làm tiền đã duyệt. Link giữ snapshot dù người dùng lên hạng hoặc chính sách mới được lưu. Nhập lại CSV, xử lý đồng thời, retry duyệt và worker restart không chọn lại tỷ lệ đã commit. Điều chỉnh hoa hồng giữ shareBps và tạo bút toán bù. Dòng không khớp tracking chưa có tỷ lệ, tiếp tục cách ly.
+Hệ số = tỷ lệ sau điều chỉnh / 100 × (1 − thuế / 100), làm tròn **lên** đến hai chữ số thập phân bằng phép tính số nguyên. Ví dụ 66% và thuế 5% cho `0.627`, làm tròn lên `0.63`. API và phép tính dùng hệ số thập phân đúng hai chữ số. Khi truyền qua Shopee, `subId4` thay dấu chấm bằng chữ `p`: `0.63` → `0p63`, `0.00` → `0p00`, `1.00` → `1p00`. Chữ ký xác thực đúng chuỗi truyền đi; CSV phải giữ nguyên Sub_id4. Form Advanced của Shopee đã từ chối dấu chấm, nên không truyền `0.63` trực tiếp.
+
+Link mới được lưu vào `affiliate_links` sau khi Shopee trả URL rút gọn hợp lệ. Token SubID3 và chữ ký SubID5 giữ thông tin sản phẩm, thời điểm tạo, phiên bản chính sách và tỷ lệ đã chọn; token không chứa số Xu cố định. Token v2 có hạn 6 × 24 giờ từ lúc tạo; token v1 đã phát hành giữ hạn 7 × 24 giờ. Thuế thay đổi hoặc lên hạng không thay đổi hệ số link đã tạo; đối soát dùng chính sách lưu trữ theo phiên bản token.
+
+Hết hạn mà không có đơn đang xử lý/đã duyệt: lưu trạng thái cancel và thông báo trong ứng dụng một lần, không tự xóa bản ghi. Khách được xóa thật link chưa có đơn hoặc chỉ có đơn hủy/từ chối; có đơn đang xử lý hoặc đã duyệt thì khóa xóa. Link cũ chưa có metadata mới chỉ được xem. Xóa link không vô hiệu hóa SubID: đơn mua đúng hạn báo về muộn vẫn được ghi nhận, không tạo lại link đã xóa. Bản ghi đơn và ledger ví giữ nguyên.
+
+Khi nhập đơn: `cashback = ceil(commission × effectiveShareBps / 10000)`. Số Xu hoàn của đơn qua link mới làm tròn lên đơn vị nguyên; ví dụ 10.001 × 0.63 → 6.301 Xu. Đơn cũ (`commission_share`) giữ cách làm tròn xuống khi có điều chỉnh, không tính lại lịch sử. Commission lấy từ báo cáo thực tế của dòng sản phẩm, không nhân thêm Qty. Snapshot hệ số được lưu trên đơn khi ghi nhận, cùng tracking và thời gian hợp lệ. Import lặp, duyệt lại và điều chỉnh hoa hồng giữ nguyên tỷ lệ; thay đổi tiền qua bút toán ví hiện có.
+
+Trước tạo link, backend liệt kê tối đa 101 kết quả random để trả đúng khoảng tỷ lệ hiệu lực. Không lấy hai đầu cấu hình làm hai đầu dự kiến vì quy tắc điều chỉnh làm thay đổi cực trị. Sau tạo, frontend dùng `sharePercent` đã chốt và hoa hồng checker để hiển thị một mức tiền dự kiến; hoa hồng báo cáo vẫn quyết định tiền thực tế. Chính sách cũ có khoảng không hợp lệ phải được quản trị sửa trước khi tạo link mới.
 
 ## Dữ liệu và kiểm chứng
 
-Migration 8 thêm cashback_tiers, snapshot trên affiliate_links và tỷ lệ trên orders. Link/đơn cũ giữ tỷ lệ cố định từ chính sách trước đây, tier null và số tiền hiện có. Không suy đoán hạng lịch sử hoặc reset ví. Rollback từ chối nếu đã có link/đơn theo hạng để tránh mất snapshot tài chính.
+Migration 13 thêm thuế phiên bản chính sách, mặc định 500 basis points. Migration 14 bổ sung metadata link mới và hỗ trợ thời hạn 144/168 giờ. Không cập nhật link cũ, đơn cũ hoặc số dư. Migration 14 đã được áp dụng lên schema Supabase `hoanxu` ngày 2026-10-07 sau kiểm thử và sao lưu (version 14, clean). Đối chiếu trước/sau và sau khi khởi động backend xác nhận 6.752 link lịch sử, 6.749 đơn, khách hàng và toàn bộ dữ liệu ví giữ nguyên; không có chênh lệch số dư hoặc giao dịch mất cân bằng.
 
-Kiểm thử PostgreSQL dùng database riêng: snapshot/link thật qua service, lên hạng, CSV trùng/concurrent, restart, retry credit, điều chỉnh tăng/giảm, ledger cân bằng, quyền và reauth, xung đột phiên bản, idempotency và giữ tiền qua migration. Unit tests kiểm tra ngưỡng, khoảng/tỷ lệ chính xác, hai đầu random và rounding. Playwright kiểm tra quản trị/khách VI/EN trên desktop/mobile. Fixtures không tạo tiền hoặc đơn trong database ứng dụng.
+Kiểm thử PostgreSQL trên database riêng có tên kết thúc `_test`; unit tests bao phủ endpoint, khoảng nguyên, thuế, làm tròn và không lộ cấu hình nội bộ. Playwright kiểm tra cấu hình quản trị, khoảng dự kiến, tỷ lệ chốt và vòng ví trên desktop/mobile.

@@ -864,5 +864,13 @@
   "Lên hạng thật hay, thêm vui mỗi ngày.": "Reach a new tier, add more shopping cheer.",
   "Sản phẩm đang tải chậm. Bạn thử lại sau một chút nhé.": "This item is loading slowly. Please try again shortly.",
   "Hoạt động mới sẽ xuất hiện tại đây.": "New activity will appear here.",
-  "Chưa mở": "Not available yet"
+  "Chưa mở": "Not available yet",
+  "Phần trăm thuế (%)": "Tax percentage (%)",
+  "Phần trăm thuế phải từ 0–100%, tối đa hai chữ số thập phân.": "Tax percentage must be between 0 and 100%, with at most two decimal places.",
+  "Tỷ lệ phải là số nguyên; tối đa cao hơn tối thiểu ít nhất 5 điểm phần trăm.": "Rates must be whole percentages; the maximum must exceed the minimum by at least 5 percentage points.",
+  "Tối đa phải cao hơn tối thiểu ít nhất 5 điểm phần trăm.": "The maximum must exceed the minimum by at least 5 percentage points.",
+  "Mỗi link chốt tỷ lệ một lần; hệ số sau thuế làm tròn lên hai chữ số thập phân và giữ nguyên khi chính sách thay đổi.": "Each link fixes its rate once; the coefficient after tax is rounded up to two decimal places and remains unchanged when the policy changes.",
+  "Không có link.": "Link not found.",
+  "Link lịch sử chỉ được xem, không được xóa.": "Historical links are read only and cannot be deleted.",
+  "Link đang xử lý hoặc hoàn thành, không được xóa.": "Links with pending or completed orders cannot be deleted."
 }

@@ -125,11 +125,21 @@ func env(k, def string) string {
 func maintenance(ctx context.Context, s *platform.Store) {
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
+	// Also catch links that expired while the backend was stopped.
+	cancelExpired := func() {
+		c, done := context.WithTimeout(ctx, 30*time.Second)
+		defer done()
+		if err := (&affiliate.Service{Store: s}).CancelExpired(c, time.Now().UTC()); err != nil {
+			slog.Error("link_cancellation_failed", "error", err)
+		}
+	}
+	cancelExpired()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			cancelExpired()
 			for _, q := range []string{`DELETE FROM rate_limit_buckets WHERE expires_at<now()`, `DELETE FROM oauth_requests WHERE expires_at<now()`, `DELETE FROM sessions WHERE expires_at<now()`} {
 				if _, e := s.Pool.Exec(ctx, q); e != nil {
 					slog.Error("maintenance_failed", "error", e)

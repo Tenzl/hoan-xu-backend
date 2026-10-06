@@ -59,17 +59,18 @@ func (q *Queries) CashbackTiers(ctx context.Context, policyID pgtype.UUID) ([]Ca
 }
 
 const currentCashbackPolicy = `-- name: CurrentCashbackPolicy :one
-SELECT id::text,created_at FROM cashback_policies WHERE mode='tiered' ORDER BY created_at DESC,id DESC LIMIT 1
+SELECT id::text,created_at,tax_bps FROM cashback_policies WHERE mode='tiered' ORDER BY created_at DESC,id DESC LIMIT 1
 `
 
 type CurrentCashbackPolicyRow struct {
 	ID        string
 	CreatedAt pgtype.Timestamptz
+	TaxBps    int32
 }
 
 func (q *Queries) CurrentCashbackPolicy(ctx context.Context) (CurrentCashbackPolicyRow, error) {
 	row := q.db.QueryRow(ctx, currentCashbackPolicy)
 	var i CurrentCashbackPolicyRow
-	err := row.Scan(&i.ID, &i.CreatedAt)
+	err := row.Scan(&i.ID, &i.CreatedAt, &i.TaxBps)
 	return i, err
 }

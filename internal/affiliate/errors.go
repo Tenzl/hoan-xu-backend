@@ -31,6 +31,8 @@ func checkError(err error) error {
 		return platform.Fail(429, "SHOPEE_RATE_LIMITED", "Shopee đang giới hạn truy cập. Chờ một lúc trước khi thử lại.")
 	case "SHOPEE_TIMEOUT":
 		return platform.Fail(504, "SHOPEE_TIMEOUT", "Shopee chưa trả xong dữ liệu sản phẩm trong thời gian cho phép. Vui lòng thử lại.")
+	case "SHOPEE_SUBID_REJECTED":
+		return platform.Fail(502, "SHOPEE_SUBID_REJECTED", "Shopee không chấp nhận định dạng tracking của link. Chưa tạo link hoàn Xu.")
 	case "SHOPEE_RESPONSE_INVALID":
 		return platform.Fail(502, "SHOPEE_RESPONSE_INVALID", "Dữ liệu sản phẩm Shopee không hợp lệ. Vui lòng thử lại sau.")
 	default:

@@ -87,7 +87,7 @@ func TestCreatedLinkHistoryWithoutSaving(t *testing.T) {
 		path = "/affiliate-links?perPage=2&cursor=" + response.Meta.NextCursor
 	}
 	for id := range seen {
-		if w := request(http.MethodPatch, "/affiliate-links/"+id, `{"saved":true}`); w.Code != http.StatusNotFound {
+		if w := request(http.MethodPatch, "/affiliate-links/"+id, `{"saved":true}`); w.Code != http.StatusMethodNotAllowed {
 			t.Fatal("removed save endpoint is still available", w.Code, w.Body.String())
 		}
 		break

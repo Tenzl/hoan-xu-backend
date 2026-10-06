@@ -2939,29 +2939,6 @@
           }
         ],
         "responses": {
-          "201": {
-            "description": "Created link with immutable membership and share range snapshot",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/AffiliateLinkCreated"
-                    },
-                    "meta": {
-                      "$ref": "#/components/schemas/Meta"
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "meta"
-                  ]
-                }
-              }
-            }
-          },
           "400": {
             "description": "Invalid JSON",
             "content": {
@@ -3028,6 +3005,29 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Created short link and signed 7-day tracking token without persisting a link or order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AffiliateLinkCreated"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
                 }
               }
             }
@@ -11251,6 +11251,279 @@
           }
         }
       }
+    },
+    "/affiliate-links/{id}": {
+      "delete": {
+        "operationId": "delete__affiliate_links__id_",
+        "tags": [
+          "Customer"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": true
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Link not found or owned by another customer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "Link deleted; no response body"
+          }
+        },
+        "summary": "DELETE /affiliate-links/{id}",
+        "description": "Physically removes a signed saved link belonging to the customer. Legacy links are read-only; pending or approved orders lock deletion. Timely orders remain attributable after deletion."
+      },
+      "get": {
+        "operationId": "get__affiliate_links__id_",
+        "tags": [
+          "Customer"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AffiliateLink"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Link not found or owned by another customer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "GET /affiliate-links/{id}"
+      }
     }
   },
   "components": {
@@ -11688,10 +11961,7 @@
           "channel": {
             "type": "string",
             "enum": [
-              "shopee",
-              "lazada",
-              "tiktok",
-              "tiki"
+              "shopee"
             ]
           },
           "publisher": {
@@ -11707,7 +11977,8 @@
           "lineId": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 100
+            "maxLength": 100,
+            "description": "Ignored; the source key is derived from order/conversion/shop/item/model/promotion identifiers."
           },
           "productName": {
             "type": "string",
@@ -11730,6 +12001,52 @@
             "type": "string",
             "minLength": 3,
             "maxLength": 500
+          },
+          "shopId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[0-9]+$"
+          },
+          "itemId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[0-9]+$"
+          },
+          "conversionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[0-9]+$"
+          },
+          "modelId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[0-9]+$"
+          },
+          "promotionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[0-9]+$"
+          },
+          "orderedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Actual order placement time with time zone, not report import time."
+          },
+          "subIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 50
+            },
+            "minItems": 5,
+            "maxItems": 5,
+            "description": "Exact Shopee report Sub_id1–5 in order. Sub_id4 uses p instead of a decimal point, e.g. 0p63 for the factor 0.63; Sub_id5 authenticates the original strings."
           }
         },
         "required": [
@@ -11737,11 +12054,17 @@
           "channel",
           "publisher",
           "externalId",
-          "lineId",
           "productName",
           "value",
           "commission",
-          "evidence"
+          "evidence",
+          "shopId",
+          "itemId",
+          "conversionId",
+          "modelId",
+          "promotionId",
+          "orderedAt",
+          "subIds"
         ]
       },
       "OrderEventInput": {
@@ -12268,6 +12591,38 @@
             "minimum": 0,
             "maximum": 100,
             "multipleOf": 0.01
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "progress",
+              "completed",
+              "cancelled",
+              "legacy"
+            ]
+          },
+          "canDelete": {
+            "type": "boolean"
+          },
+          "legacy": {
+            "type": "boolean"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "effectiveSharePercent": {
+            "minimum": 0,
+            "nullable": true,
+            "type": "number",
+            "maximum": 100
+          },
+          "payoutFactor": {
+            "type": "string",
+            "pattern": "^(0\\.[0-9]{2}|1\\.00)$",
+            "nullable": true
           }
         },
         "required": [
@@ -12280,7 +12635,13 @@
           "policyId",
           "tierCode",
           "minSharePercent",
-          "maxSharePercent"
+          "maxSharePercent",
+          "status",
+          "canDelete",
+          "legacy",
+          "expiresAt",
+          "effectiveSharePercent",
+          "payoutFactor"
         ]
       },
       "Deal": {
@@ -12963,13 +13324,13 @@
             "type": "number",
             "minimum": 0,
             "maximum": 100,
-            "multipleOf": 0.01
+            "multipleOf": 1
           },
           "maxSharePercent": {
             "type": "number",
             "minimum": 0,
             "maximum": 100,
-            "multipleOf": 0.01
+            "multipleOf": 1
           }
         },
         "required": [
@@ -12998,12 +13359,20 @@
             },
             "minItems": 3,
             "maxItems": 3
+          },
+          "taxPercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01,
+            "description": "Internal administrative configuration; not included in customer responses."
           }
         },
         "required": [
           "id",
           "createdAt",
-          "tiers"
+          "tiers",
+          "taxPercent"
         ]
       },
       "CashbackPolicyInput": {
@@ -13021,11 +13390,19 @@
             },
             "minItems": 3,
             "maxItems": 3
+          },
+          "taxPercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01,
+            "description": "Internal administrative configuration; not included in customer responses."
           }
         },
         "required": [
           "currentVersionId",
-          "tiers"
+          "tiers",
+          "taxPercent"
         ]
       },
       "Membership": {
@@ -13071,7 +13448,7 @@
           "nextTier": {
             "allOf": [
               {
-                "$ref": "#/components/schemas/CashbackTier"
+                "$ref": "#/components/schemas/PublicCashbackTier"
               }
             ],
             "nullable": true
@@ -13081,6 +13458,21 @@
             "format": "int64",
             "minimum": 0,
             "maximum": 1000000000000
+          },
+          "effectiveMinSharePercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01
+          },
+          "effectiveMaxSharePercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01
+          },
+          "previewAvailable": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -13091,7 +13483,10 @@
           "maxSharePercent",
           "approvedOrders",
           "nextTier",
-          "ordersToNext"
+          "ordersToNext",
+          "effectiveMinSharePercent",
+          "effectiveMaxSharePercent",
+          "previewAvailable"
         ]
       },
       "Dashboard": {
@@ -13187,10 +13582,6 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
           "channel": {
             "type": "string",
             "enum": [
@@ -13208,8 +13599,9 @@
           },
           "trackingCode": {
             "type": "string",
-            "minLength": 0,
-            "maxLength": 500
+            "minLength": 49,
+            "maxLength": 49,
+            "pattern": "^[0-9A-Za-z]{49}$"
           },
           "policyId": {
             "type": "string",
@@ -13234,18 +13626,64 @@
             "minimum": 0,
             "maximum": 100,
             "multipleOf": 0.01
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "payoutFactor": {
+            "type": "string",
+            "pattern": "^(0\\.[0-9]{2}|1\\.00)$",
+            "description": "Decimal payout factor used for preview and actual-commission cashback. Shopee Sub_id4 uses the carrier 0p63 for payoutFactor 0.63."
+          },
+          "effectiveSharePercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 1
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "progress",
+              "completed",
+              "cancelled"
+            ]
+          },
+          "canDelete": {
+            "type": "boolean"
+          },
+          "legacy": {
+            "type": "boolean"
           }
         },
         "required": [
-          "id",
           "channel",
           "affiliateUrl",
           "trackingCode",
           "policyId",
           "tierCode",
           "minSharePercent",
-          "maxSharePercent"
-        ]
+          "maxSharePercent",
+          "createdAt",
+          "expiresAt",
+          "payoutFactor",
+          "effectiveSharePercent",
+          "id",
+          "status",
+          "canDelete",
+          "legacy"
+        ],
+        "description": "Saved Shopee short link. New v2 tokens grant 144 hours; v1 tokens retain 168 hours. Physical deletion removes only the link record: timely orders remain attributable through signed SubIDs."
       },
       "ManualOrderCreated": {
         "type": "object",
@@ -13254,21 +13692,6 @@
           "id": {
             "type": "string",
             "format": "uuid"
-          },
-          "tierCode": {
-            "type": "string",
-            "enum": [
-              "bronze",
-              "platinum",
-              "diamond"
-            ],
-            "nullable": true
-          },
-          "sharePercent": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 100,
-            "multipleOf": 0.01
           },
           "cashback": {
             "type": "integer",
@@ -13279,8 +13702,6 @@
         },
         "required": [
           "id",
-          "tierCode",
-          "sharePercent",
           "cashback"
         ]
       },
@@ -13452,6 +13873,65 @@
           "unit",
           "createdAt"
         ]
+      },
+      "PublicCashbackTier": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tierCode": {
+            "type": "string",
+            "enum": [
+              "bronze",
+              "platinum",
+              "diamond"
+            ]
+          },
+          "minApprovedOrders": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000
+          },
+          "minSharePercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 1,
+            "description": "Effective reward percentage for previews."
+          },
+          "maxSharePercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 1,
+            "description": "Effective reward percentage for previews."
+          },
+          "effectiveMinSharePercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01
+          },
+          "effectiveMaxSharePercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01
+          },
+          "previewAvailable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "tierCode",
+          "minApprovedOrders",
+          "minSharePercent",
+          "maxSharePercent",
+          "effectiveMinSharePercent",
+          "effectiveMaxSharePercent",
+          "previewAvailable"
+        ],
+        "description": "Customer reward range after applying the internal policy; no internal configuration is exposed."
       }
     }
   }

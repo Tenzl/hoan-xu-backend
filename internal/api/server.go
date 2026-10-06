@@ -386,7 +386,22 @@ func (s *Server) customerRoutes(r chi.Router) {
 		})
 		r.Get("/affiliate-links", func(w http.ResponseWriter, r *http.Request) {
 			l, o := page(r)
-			s.list(w, r, `SELECT jsonb_build_object('id',id,'channel',channel,'originalUrl',original_url,'affiliateUrl',affiliate_url,'trackingCode',tracking_code,'createdAt',created_at,'policyId',policy_id,'tierCode',tier_code,'minSharePercent',min_share_bps::numeric/100,'maxSharePercent',max_share_bps::numeric/100) FROM affiliate_links WHERE user_id=$1 ORDER BY created_at DESC,id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o)
+			s.list(w, r, affiliate.LinksSQL+` WHERE l.user_id=$1 ORDER BY l.created_at DESC,l.id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o)
+		})
+		r.Delete("/affiliate-links/{id}", func(w http.ResponseWriter, r *http.Request) {
+			if err := s.Affiliate.DeleteLink(r.Context(), user(r).ID, chi.URLParam(r, "id")); err != nil {
+				s.reply(w, r, 0, nil, err)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})
+		r.Get("/affiliate-links/{id}", func(w http.ResponseWriter, r *http.Request) {
+			id := chi.URLParam(r, "id")
+			if !platform.ID(id) {
+				s.reply(w, r, 0, nil, platform.Fail(404, "NOT_FOUND", "Không có link."))
+				return
+			}
+			s.one(w, r, affiliate.LinksSQL+` WHERE l.id=$1 AND l.user_id=$2`, id, user(r).ID)
 		})
 		r.Post("/affiliate-links", func(w http.ResponseWriter, r *http.Request) {
 			var p struct {
@@ -400,7 +415,7 @@ func (s *Server) customerRoutes(r chi.Router) {
 			if e == nil {
 				v, e = s.Affiliate.CreateLink(r.Context(), user(r).ID, p.URL)
 			}
-			s.reply(w, r, 201, v, e)
+			s.reply(w, r, 200, v, e)
 		})
 		r.Get("/withdrawals", s.withdrawalList(false))
 		r.Post("/withdrawals", func(w http.ResponseWriter, r *http.Request) {
@@ -503,7 +518,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	if e == nil {
 		v["approvedOrders"] = m.ApprovedOrders
-		v["membership"] = m
+		v["membership"] = m.Public()
 		e = tx.Commit(r.Context())
 	}
 	s.reply(w, r, 200, v, e)

@@ -8,8 +8,8 @@ import (
 	"hoanxu/internal/browser"
 	"hoanxu/internal/cashback"
 	"hoanxu/internal/platform"
+	"hoanxu/internal/tracking"
 	"log/slog"
-	"net/url"
 	"strconv"
 	"sync"
 	"time"
@@ -19,9 +19,16 @@ type cacheEntry struct {
 	at   time.Time
 	data json.RawMessage
 }
+
+type OfferLinkGenerator interface {
+	CreateOfferLink(context.Context, string, string, [5]string) (string, error)
+}
+
 type Service struct {
-	Store                     *platform.Store
-	Browser                   *browser.Manager
+	Store         *platform.Store
+	Browser       *browser.Manager
+	LinkGenerator OfferLinkGenerator // Defaults to Browser.
+
 	Enabled, TrackingVerified bool
 	Publisher                 string
 	SchemaVerified            bool
@@ -138,8 +145,7 @@ func (s *Service) Check(ctx context.Context, raw string) (value any, checkErr er
 	}
 }
 func (s *Service) CreateLink(ctx context.Context, user, raw string) (any, error) {
-	shop, item, canonical, e := Resolve(ctx, raw)
-	_ = shop
+	shop, item, _, e := Resolve(ctx, raw)
 	if e != nil {
 		return nil, platform.Fail(422, "INVALID_URL", e.Error())
 	}
@@ -161,41 +167,73 @@ func (s *Service) CreateLink(ctx context.Context, user, raw string) (any, error)
 		return nil, platform.Fail(503, "CHANNEL_UNAVAILABLE", "Kênh Shopee chưa được bật.")
 	}
 	var conf struct {
-		Template  string `json:"template"`
 		Publisher string `json:"publisher"`
 	}
 	if e = json.Unmarshal(settings, &conf); e != nil {
 		return nil, e
 	}
 	if conf.Publisher == "" {
-		conf.Publisher = s.Publisher
-	}
-	if conf.Publisher == "" {
 		return nil, platform.Fail(503, "PUBLISHER_NOT_CONFIGURED", "Nhập Affiliate ID tại trang Đăng nhập Shopee trước khi tạo link.")
 	}
-	tracking := platform.Hash(platform.Token())[:20]
-	u, e := url.Parse(conf.Template)
-	if e != nil || u.Scheme != "https" || u.User != nil || u.Hostname() != "s.shopee.vn" || u.Path != "/an_redir" {
-		return nil, platform.Fail(503, "INVALID_TEMPLATE", "Mẫu link chưa được cấu hình hợp lệ.")
-	}
-	q := u.Query()
-	q.Set("origin_link", canonical)
-	q.Set("affiliate_id", conf.Publisher)
-	q.Set("sub_id", tracking)
-	u.RawQuery = q.Encode()
-	var id string
-	// Pin the policy while resolving membership and writing the link snapshot.
-	_, e = tx.Exec(ctx, `SELECT id FROM app_settings FOR SHARE`)
-	if e != nil {
+	var customerTracking string
+	if e = tx.QueryRow(ctx, `SELECT tracking_code FROM users WHERE id=$1 AND role='customer' AND NOT blocked`, user).Scan(&customerTracking); e != nil {
 		return nil, e
 	}
+	if _, e = tx.Exec(ctx, `SELECT id FROM app_settings FOR SHARE`); e != nil {
+		return nil, e
+	}
+	// Snapshot before contacting Shopee, without holding a transaction over the network.
 	m, e := cashback.MembershipFor(ctx, s.Store.Queries.WithTx(tx), user)
 	if e != nil {
 		return nil, e
 	}
-	e = tx.QueryRow(ctx, `INSERT INTO affiliate_links(user_id,channel,original_url,affiliate_url,tracking_code,policy_id,item_id,tier_code,min_share_bps,max_share_bps) VALUES($1,'shopee',$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id::text`, user, raw, u.String(), tracking, m.PolicyID, item, m.Code, int(m.Min), int(m.Max)).Scan(&id)
+	var version uint32
+	if e = tx.QueryRow(ctx, `SELECT tracking_version FROM cashback_policies WHERE id=$1`, m.PolicyID).Scan(&version); e != nil {
+		return nil, e
+	}
+	if e = tx.Commit(ctx); e != nil {
+		return nil, e
+	}
+	rate, e := cashback.SampleLink(nil, int(m.Min), int(m.Max), int(m.Tax))
+	if e != nil {
+		return nil, platform.Fail(422, "INVALID_CASHBACK_POLICY", "Khoảng tỷ lệ cần là số nguyên và chênh lệch ít nhất 5 điểm phần trăm.")
+	}
+	bps := rate.MainBps
+	shopID, e := strconv.ParseUint(shop, 10, 64)
 	if e != nil {
 		return nil, e
 	}
-	return map[string]any{"id": id, "affiliateUrl": u.String(), "trackingCode": tracking, "channel": "shopee", "policyId": m.PolicyID, "tierCode": m.Code, "minSharePercent": m.Min, "maxSharePercent": m.Max}, tx.Commit(ctx)
+	itemID, e := strconv.ParseUint(item, 10, 64)
+	if e != nil {
+		return nil, e
+	}
+	created := time.Now().UTC().Truncate(time.Second)
+	claims := tracking.Claims{CreatedAt: created, Shop: shopID, Item: itemID, Policy: version, Tier: m.Code, Bps: bps}
+	ids, e := tracking.Issue(claims, customerTracking, conf.Publisher, rate.Factor(), s.Store.SignTracking)
+	if e != nil {
+		return nil, e
+	}
+	generator := s.LinkGenerator
+	if generator == nil {
+		if s.Browser == nil {
+			return nil, platform.Fail(503, "BROWSER_UNAVAILABLE", "Chrome Shopee chưa sẵn sàng.")
+		}
+		generator = s.Browser
+	}
+	linkCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
+	defer cancel()
+	shortURL, e := generator.CreateOfferLink(linkCtx, shop, item, ids)
+	if e != nil {
+		return nil, checkError(e)
+	}
+	subIDs, e := json.Marshal(ids)
+	if e != nil {
+		return nil, e
+	}
+	var id string
+	e = s.Store.Pool.QueryRow(ctx, `INSERT INTO affiliate_links(user_id,channel,original_url,affiliate_url,tracking_code,policy_id,item_id,created_at,tier_code,min_share_bps,max_share_bps,tracking_sub_ids,expires_at,payout_factor,effective_share_bps,lifecycle_status) VALUES($1,'shopee',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'active') RETURNING id::text`, user, raw, shortURL, ids[2], m.PolicyID, item, created, m.Code, int(m.Public().Min), int(m.Public().Max), subIDs, claims.ExpiresAt(), rate.Factor(), rate.EffectiveBps).Scan(&id)
+	if e != nil {
+		return nil, e
+	}
+	return map[string]any{"id": id, "status": "active", "canDelete": true, "legacy": false, "affiliateUrl": shortURL, "trackingCode": ids[2], "channel": "shopee", "policyId": m.PolicyID, "tierCode": m.Code, "minSharePercent": m.Public().Min, "maxSharePercent": m.Public().Max, "effectiveSharePercent": cashback.Percent(rate.EffectiveBps), "payoutFactor": rate.Factor(), "createdAt": created, "expiresAt": claims.ExpiresAt()}, nil
 }
