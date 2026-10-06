@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +29,29 @@ route();
 </script></body>`
 
 func TestWarmWorkersReuseDocumentsAndRejectLateResponses(t *testing.T) {
+	for _, mode := range []string{"local", "remote"} {
+		t.Run(mode, func(t *testing.T) { warmWorkersReuseDocumentsAndRejectLateResponses(t, mode) })
+	}
+}
+
+func workerTestManager(t *testing.T, mode string) *Manager {
+	t.Helper()
+	if mode == "local" {
+		path := os.Getenv("BROWSER_TEST_PATH")
+		if path == "" {
+			t.Skip("Set BROWSER_TEST_PATH to test local browser workers")
+		}
+		return NewManual(path, t.TempDir(), WithHeadless(true))
+	}
+	endpoint, _ := startExternalChrome(t, t.TempDir())
+	m, err := NewRemote(endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+func warmWorkersReuseDocumentsAndRejectLateResponses(t *testing.T, mode string) {
 	late := make(chan struct{})
 	lateStarted := make(chan struct{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -57,11 +81,7 @@ func TestWarmWorkersReuseDocumentsAndRejectLateResponses(t *testing.T) {
 		fmt.Fprintf(w, `{"code":0,"data":{"item_id":"%s"}}`, r.URL.Query().Get("item_id"))
 	}))
 	defer server.Close()
-	endpoint, _ := startExternalChrome(t, t.TempDir())
-	m, err := NewRemote(endpoint)
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := workerTestManager(t, mode)
 	m.probeURL, m.offerBaseURL = server.URL+"/dashboard", server.URL+"/offer/"
 	u, _ := url.Parse(server.URL)
 	m.responseHost = u.Host

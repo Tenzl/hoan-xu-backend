@@ -19,6 +19,8 @@ To create the first admin, set `ADMIN_PASSWORD` in your shell environment and ru
 
 Local development uses `BROWSER_MODE=local`, `CHROME_PATH` and a private `CHROME_PROFILE`; Chrome starts when an administrator opens it. Production uses `BROWSER_MODE=remote` and `CHROME_REMOTE_URL=http://127.0.0.1:9222` over an SSH tunnel to Chromium on EC2. Remote Chrome runs continuously and Go probes its session on startup/reconnect. Open **Đăng nhập Shopee → Mở Chrome trên server**, sign in, then choose **Tôi đã đăng nhập — Kiểm tra phiên**. The API does not import, export or restore Shopee cookies from files or the database.
 
+Both modes preload and reuse two worker tabs after session verification, keeping the administrator's login tab separate. Local mode runs Chrome on the developer's computer; it does not connect to EC2. Failed or timed-out worker tabs are closed and replaced when needed.
+
 Enter the Shopee **Affiliate ID (Shopee Publisher)** on the same page and save it. The ID is stored in `affiliate_channels.settings` and used when creating links; no `SHOPEE_PUBLISHER` environment variable is required. Saving an ID or signing in does not automatically enable verified tracking. Production Chrome keeps its profile on EC2 EBS, independently of Render restarts; Shopee can still request login/verification. Historical migration 10 and its private table remain, but the API no longer uses their cookie data.
 
 `CHROME_HEADLESS=false` opens Chromium for manual verification on a desktop. `true` runs it hidden. Shopee may still require manual access verification; successful desktop checks do not guarantee cloud/headless operation. No CAPTCHA or two-factor verification is automated.

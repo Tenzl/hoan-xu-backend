@@ -86,6 +86,11 @@ func NewManaged(path, profile string, cookies *CookieStore, enabled bool, option
 func NewManual(path, profile string, options ...Option) *Manager {
 	m := NewManaged(path, profile, nil, false, WithHeadless(false))
 	m.manualLogin = true
+	// Local and remote manual browsers share the same two reusable workers.
+	// The root tab stays separate for administrator login/verification.
+	m.workerTabs = make(chan *workerTab, 2)
+	m.workerTabs <- nil
+	m.workerTabs <- nil
 	for _, option := range options {
 		option(m)
 	}

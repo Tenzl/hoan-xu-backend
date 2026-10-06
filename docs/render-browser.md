@@ -107,7 +107,9 @@ Khi router không tạo request sản phẩm sau 3 giây, checker mở trang the
 thông thường. Kiểm tra lại đúng sản phẩm trong cùng tab cũng reload để nhận
 response mới; response cũ bắt đầu trước lượt kiểm tra không được chấp nhận.
 Redirect đăng nhập/xác minh (kể cả trong SPA) và API 401/403 vẫn làm phiên hết
-hiệu lực. Local mode vẫn dùng tab riêng và đóng sau từng lượt.
+hiệu lực. Cả `BROWSER_MODE=local` và `remote` đều giữ hai tab worker để tái sử
+dụng; tab đăng nhập/xác minh của admin được giữ riêng. Worker lỗi hoặc timeout
+được đóng và tạo lại khi cần.
 
 Khởi động/reconnect/kiểm tra phiên cần tải sẵn các tab trước khi trạng thái
 browser thành authenticated. API/database readiness độc lập với việc này.
@@ -138,9 +140,12 @@ không dùng để kết luận độ trễ Render → EC2.
 ## Development, kiểm thử và rollback
 
 Development giữ `BROWSER_MODE=local`, `CHROME_HEADLESS=false`, `CHROME_PATH` và
-profile trên máy developer; chạy `go run ./cmd/api` như trước. Image production
-mới không có Chrome local. Khi cần rollback deployment gộp, dùng image/backend
-revision cũ và giữ nguyên disk/profile cũ trước khi chuyển đổi.
+profile trên máy developer; chạy `scripts/dev.ps1` hoặc `go run ./cmd/api` như
+trước. Local không kết nối EC2: mở Chrome từ admin, đăng nhập rồi kiểm tra phiên
+để tải sẵn hai tab worker. Các sản phẩm khác nhau dùng router trong tab đã tải
+sẵn như remote; kiểm tra lại cùng sản phẩm vẫn reload để lấy response mới.
+Image production mới không có Chrome local. Khi cần rollback deployment gộp,
+dùng image/backend revision cũ và giữ nguyên disk/profile cũ trước khi chuyển đổi.
 
 Thử remote từ máy developer bằng tunnel tự quản lý:
 
