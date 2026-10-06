@@ -14,3 +14,7 @@ jobs:
       - run: go run ./tests/run.go
       - run: go run ./tests/run.go vet
       - run: go build ./cmd/api ./cmd/admin
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --experimental-vm-modules --test tests/unit/remotebrowser/viewer.test.cjs

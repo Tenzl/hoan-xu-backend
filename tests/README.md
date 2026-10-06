@@ -14,6 +14,7 @@ Run from the backend repository root:
 go run ./tests/run.go
 go run ./tests/run.go vet
 go run ./tests/run.go test -run TestPeriodBoundsVietnam -v
+node --experimental-vm-modules --test tests/unit/remotebrowser/viewer.test.cjs
 ```
 
 On Windows, `./tests/run.ps1` loads the backend `.env`, requires the dedicated `TEST_DATABASE_URL` and runs tests/vet. CI uses the same Go runner. Database tests require a separate database ending in `_test`; Chromium tests require `BROWSER_TEST_PATH`.
