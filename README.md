@@ -67,6 +67,12 @@ The frontend contract is `contracts/openapi.yaml`; `node scripts/refine-contract
 
 ## Deployment status
 
+Cloudflare keepalive workers can call public `GET /ping` (for example,
+`https://hoan-xu-backend.onrender.com/ping`). It returns HTTP 200 with
+`data.status`, `data.service` and `data.time` in the standard JSON envelope,
+with `Cache-Control: no-store`. No authentication or database/browser request
+is needed. Use `/readyz` when database readiness must also be checked.
+
 The current development and production environment files share a Supabase database through its session pooler. Application tables are in the private `hoanxu` schema. See `docs/supabase.md` for the required search path, encryption key and separate test database configuration.
 
 `Dockerfile` and `render.yaml` package Go and an SSH tunnel supervisor on Render. The independent folder [`chromium/`](chromium/README.md) at this repository's root packages Chromium, Xvfb and noVNC for EC2 and is excluded from the API Docker build context. Update the existing ignored `env.prod` with the dedicated SSH key, verified known_hosts and shared bridge password according to [deployment instructions](docs/render-browser.md); replace old combined-container browser values in that same production file, preserving application secrets. Import that file into Render rather than creating a separate Render env file. Keep one Render instance, `/readyz`, and the `/var/data` disk for private uploads. CDP and noVNC are loopback only, reached through SSH; the admin display remains protected by recent administrator authentication. Local development keeps its existing headed browser flow. No database migration or frontend endpoint change is required.

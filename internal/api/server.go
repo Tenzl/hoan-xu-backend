@@ -198,6 +198,13 @@ func New(s *Server) *chi.Mux {
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		s.reply(w, r, 200, map[string]string{"status": "ok"}, nil)
 	})
+	r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
+		s.reply(w, r, http.StatusOK, map[string]string{
+			"status":  "ok",
+			"service": "hoan-xu-backend",
+			"time":    time.Now().UTC().Format(time.RFC3339),
+		}, nil)
+	})
 	r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, c := context.WithTimeout(r.Context(), 2*time.Second)
 		defer c()
