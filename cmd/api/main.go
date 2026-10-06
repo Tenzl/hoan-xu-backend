@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -33,7 +34,11 @@ func main() {
 func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	pool, e := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
+	databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
+	if databaseURL == "" {
+		return fmt.Errorf("DATABASE_URL is required; set it in the service environment before starting the API")
+	}
+	pool, e := pgxpool.New(ctx, databaseURL)
 	if e != nil {
 		return e
 	}

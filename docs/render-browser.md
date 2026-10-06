@@ -60,6 +60,13 @@ Bỏ các biến Chrome local cũ (`CHROME_PATH`, `CHROME_PROFILE`, `DISPLAY`,
 lẫn. File `.env`/`.env.local` cho development giữ cấu hình local riêng.
 Frontend giữ `BACKEND_URL` nếu origin Go không đổi.
 
+Nếu startup báo kết nối `/tmp/.s.PGSQL.5432`, kiểm tra `DATABASE_URL` trong
+Environment của đúng Web Service: biến thiếu/rỗng khiến pgx dùng socket local.
+File `env.prod` trên máy quản trị không được Git push hoặc Docker COPY vào
+image, nên cần import vào Render và chọn Save and deploy sau khi kiểm tra các
+giá trị. Upload file trong Secret Files không tự tạo Environment Variables.
+Backend từ chối khởi động khi thiếu `DATABASE_URL` và báo lỗi cấu hình rõ ràng.
+
 Entrypoint ghi SSH key vào thư mục tạm mode 700, file mode 600; không ghi key
 vào disk upload và không chuyển biến chứa key cho process API. SSH dùng
 `StrictHostKeyChecking=yes`, key riêng, keepalive và hai local forwards chỉ bind
