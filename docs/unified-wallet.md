@@ -20,7 +20,7 @@ Không rollback bằng down migration sau khi đã chi tiền. Khôi phục bả
 - Wallet: `available`, `held`, `giftHeld`, `debt`, `unit`.
 - Check-in GET: `available`, `streak`, `best`, `lastDay`, `today`, `checkedIn`, `days`, `unit`. POST: `awardXu`, `available`, `streak`, `day`.
 - Gift API/updates: `costXu`; historical redemption also returns `costUnit` and `legacyCost` when applicable.
-- Wallet history: available delta `amount`, reserve deltas `heldAmount`/`giftHeldAmount`, `unit`. Legacy coin history returns `unit=legacy_coin`, original `amount` and `equivalentXu`.
+- Wallet history: available delta `amount`, reserve deltas `heldAmount`/`giftHeldAmount`, debt delta `debtAmount`, `unit`. A negative debt delta repays the outstanding debt. Legacy coin history returns `unit=legacy_coin`, original `amount` and `equivalentXu`.
 
 ## Local profiles
 

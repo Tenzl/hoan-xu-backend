@@ -3,6 +3,7 @@ package affiliate
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"golang.org/x/sync/singleflight"
 	"hoanxu/internal/browser"
 	"hoanxu/internal/cashback"
@@ -41,7 +42,9 @@ func (s *Service) Check(ctx context.Context, raw string) (value any, checkErr er
 		// Timings only: never log the input URL, response, cookies or account.
 		slog.Info("shopee_check_completed", "resolve_ms", resolveTime.Milliseconds(), "check_wait_ms", checkWait.Milliseconds(), "total_ms", time.Since(started).Milliseconds(), "cache_hit", cacheHit, "shared", shared, "success", checkErr == nil)
 	}()
-	shop, item, canonical, e := Resolve(ctx, raw)
+	resolveCtx, resolveCancel := context.WithTimeout(ctx, 8*time.Second)
+	shop, item, canonical, e := Resolve(resolveCtx, raw)
+	resolveCancel()
 	resolveTime = time.Since(started)
 	if e != nil {
 		return nil, platform.Fail(422, "INVALID_URL", e.Error())
@@ -49,7 +52,14 @@ func (s *Service) Check(ctx context.Context, raw string) (value any, checkErr er
 	if !s.CheckEnabled() || s.Browser == nil {
 		return nil, platform.Fail(503, "SHOPEE_NOT_CONFIGURED", "Shopee đang ở trạng thái chưa sẵn sàng; mẫu được giữ tại /demo.")
 	}
-	key := s.Publisher + ":" + shop + ":" + item + ":v1:" + strconv.FormatUint(s.Browser.SessionVersion(), 10)
+	publisher := s.Publisher
+	if s.Store != nil && s.Store.Pool != nil {
+		publisher, e = s.PublisherID(ctx)
+		if e != nil {
+			return nil, e
+		}
+	}
+	key := publisher + ":" + shop + ":" + item + ":v2:" + strconv.FormatUint(s.Browser.SessionVersion(), 10)
 	s.mu.Lock()
 	entry, ok := s.cache[key]
 	s.mu.Unlock()
@@ -58,7 +68,11 @@ func (s *Service) Check(ctx context.Context, raw string) (value any, checkErr er
 		return json.RawMessage(entry.data), nil
 	}
 	ch := s.group.DoChan(key, func() (any, error) {
-		c, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+		deadline := time.Now().Add(40 * time.Second)
+		if incoming, ok := ctx.Deadline(); ok && incoming.Before(deadline) {
+			deadline = incoming
+		}
+		c, cancel := context.WithDeadline(context.Background(), deadline)
 		defer cancel()
 		b, e := s.Browser.Check(c, item)
 		if e != nil {
@@ -66,7 +80,7 @@ func (s *Service) Check(ctx context.Context, raw string) (value any, checkErr er
 		}
 		var body map[string]any
 		if e = json.Unmarshal(b, &body); e != nil {
-			return nil, e
+			return nil, checkError(errors.New("SHOPEE_RESPONSE_INVALID"))
 		}
 		if code, ok := body["code"].(float64); ok && code != 0 {
 			return nil, platform.Fail(502, "SHOPEE_RESPONSE_INVALID", "Shopee trả lỗi sản phẩm.")
@@ -79,6 +93,7 @@ func (s *Service) Check(ctx context.Context, raw string) (value any, checkErr er
 		if s.SchemaVerified {
 			product, err := Normalize(data, s.PriceScale)
 			if err != nil {
+				s.Browser.RecordFailure("SHOPEE_RESPONSE_INVALID", "normalize")
 				return nil, platform.Fail(502, "SHOPEE_RESPONSE_INVALID", "Schema Shopee khác dữ liệu đã xác minh.")
 			}
 			b, _ := json.Marshal(product)
@@ -90,6 +105,9 @@ func (s *Service) Check(ctx context.Context, raw string) (value any, checkErr er
 			result["schemaVerified"] = true
 		}
 		serialized, _ := json.Marshal(result)
+		if !s.SchemaVerified {
+			return json.RawMessage(serialized), nil
+		}
 		s.mu.Lock()
 		if s.cache == nil {
 			s.cache = map[string]cacheEntry{}

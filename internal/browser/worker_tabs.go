@@ -3,7 +3,6 @@ package browser
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/chromedp/cdproto/network"
@@ -58,7 +57,7 @@ func (m *Manager) newWorker(root, request context.Context) (*workerTab, error) {
 	w := &workerTab{ctx: ctx, root: root, cancel: cancel}
 	// The first Run starts the target's event loop. Bind it to the worker
 	// lifetime, not a probe/job deadline that expires before the next job.
-	timer := time.AfterFunc(20*time.Second, cancel)
+	timer := time.AfterFunc(3*time.Second, cancel)
 	stopRequest := context.AfterFunc(request, cancel)
 	err := chromedp.Run(ctx, m.trackTarget(), network.Enable())
 	stopRequest()
@@ -102,38 +101,11 @@ func (m *Manager) prewarmWorkers(request context.Context) {
 			m.workerTabs <- nil
 			continue
 		}
-		scope, stop := context.WithTimeout(w.ctx, 20*time.Second)
-		stopRequest := context.AfterFunc(request, stop)
-		var location string
-		err = chromedp.Run(scope, chromedp.Navigate(m.probeURL), chromedp.Location(&location))
-		if err == nil && sessionLocationState(location, m.probeURL) == "authenticated" {
-			err = waitForWorkerApp(scope)
-		} else if err == nil {
-			err = errors.New("SHOPEE_LOGIN_REQUIRED")
-		}
-		stopRequest()
-		stop()
-		w.ready = err == nil
+		// Allocate the tab only. Each job navigates the product document normally;
+		// readiness never depends on Shopee's internal router or anchor count.
+		w.ready = true
 		m.releaseWorker(w, w.ready)
 	}
-}
-
-func waitForWorkerApp(ctx context.Context) error {
-	// The dashboard's links appear after the SPA has mounted. A plain body/load
-	// event alone can precede router initialization and lose the first popstate.
-	var ready bool
-	return chromedp.Run(ctx, chromedp.Poll(`document.querySelectorAll('a[href]').length > 0`, &ready, chromedp.WithPollingTimeout(10*time.Second)))
-}
-
-func navigateWorker(url string) chromedp.Action {
-	// Use the site's normal client router. Shopee still creates its own API
-	// requests/security context; no direct fetch or security headers are injected.
-	return chromedp.Evaluate(fmt.Sprintf(`(() => {
-		const destination = new URL(%q);
-		if (destination.origin !== location.origin) throw new Error('worker origin changed');
-		history.pushState(history.state, '', destination.href);
-		window.dispatchEvent(new PopStateEvent('popstate', {state: history.state}));
-	})()`, url), nil)
 }
 
 func (m *Manager) closeWorkerTabs() {

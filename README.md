@@ -15,6 +15,30 @@ On Windows, run `scripts/setup-local.ps1`, `scripts/migrate.ps1` and `scripts/de
 
 To create the first admin, set `ADMIN_PASSWORD` in your shell environment and run `go run ./cmd/admin create --username admin --name "Quản trị" --role admin`. Remove the environment variable afterwards. Change the temporary password at first login.
 
+## Import historical customers
+
+`go run ./cmd/admin import-legacy --file <export.md>` previews the five-column
+Markdown export (`STT`, `Tên hiển thị`, `Mua lần đầu`, `Mua gần nhất`, `Tổng đơn`)
+without opening a database connection. Dates use `dd/MM/yyyy` in Vietnam time.
+After backing up the database with `scripts/backup.ps1`, append `--apply` to import
+into the environment selected by `.env` or `ENV_FILE`.
+
+The batch `legacy-server-2026-10` creates separate customers with empty emails and
+no login identities, preserving each customer's count and first/last purchase day.
+Other timestamps and cashback amounts (5,000–40,000 VND per order) are generated
+deterministically from the normalized export. All orders are approved at their
+historical purchase time, credited to the unified wallet, and counted in historical
+leaderboards. Both link URLs are `link`; missing product/value fields use the
+documented placeholder values. A separate fixed 100% policy makes commission
+equal to the generated cashback without changing the active tiered policy.
+
+The import uses the same immutable, balanced ledger as normal order credits, with
+one `order_credit:<id>` transaction per order. Bulk balance updates apply only to
+freshly created wallets with zero debt. Customers, links, orders, events, credits
+and an audit completion marker commit together. Concurrent retries serialize;
+reapplying the same batch is a no-op, and changed source content is rejected.
+Keep the source export and backup in ignored `private-data/`, outside Git.
+
 ## Shopee
 
 Local development uses `BROWSER_MODE=local`, `CHROME_PATH` and a private `CHROME_PROFILE`; Chrome starts when an administrator opens it. Production uses `BROWSER_MODE=remote` and `CHROME_REMOTE_URL=http://127.0.0.1:9222` over an SSH tunnel to Chromium on EC2. Remote Chrome runs continuously and Go probes its session on startup/reconnect. Open **Đăng nhập Shopee → Mở Chrome trên server**, sign in, then choose **Tôi đã đăng nhập — Kiểm tra phiên**. The API does not import, export or restore Shopee cookies from files or the database.
@@ -50,3 +74,5 @@ The current development and production environment files share a Supabase databa
 ## Unified Xu wallet
 
 The wallet now combines approved cashback and check-in rewards (1 Xu = 1 VND). See [migration, API and local checklist](docs/unified-wallet.md). When `.env` targets another environment, use `.env.local` and `./scripts/dev-local.ps1`; `ENV_FILE` selects an explicit profile for Go commands and PowerShell helpers. Stop the API and back up the chosen database before migration 9.
+
+CSP/checker repair, stable error codes, safe diagnostics and real Shopee acceptance evidence: [docs/csp-shopee-repair.md](docs/csp-shopee-repair.md). The repair does not run database migrations.

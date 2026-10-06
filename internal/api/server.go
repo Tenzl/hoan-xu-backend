@@ -367,7 +367,7 @@ func (s *Server) customerRoutes(r chi.Router) {
 		})
 		r.Get("/wallet/transactions", func(w http.ResponseWriter, r *http.Request) {
 			l, o := page(r)
-			s.list(w, r, `SELECT jsonb_build_object('id',t.id,'description',t.description,'createdAt',t.created_at,'amount',coalesce(sum(e.amount) FILTER(WHERE a.kind='available'),0),'heldAmount',coalesce(sum(e.amount) FILTER(WHERE a.kind='held'),0),'giftHeldAmount',coalesce(sum(e.amount) FILTER(WHERE a.kind='gift_held'),0),'unit','xu') FROM wallet_transactions t JOIN wallet_entries e ON e.transaction_id=t.id JOIN wallet_accounts a ON a.id=e.account_id WHERE a.user_id=$1 GROUP BY t.id ORDER BY t.created_at DESC,t.id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o)
+			s.list(w, r, `SELECT jsonb_build_object('id',t.id,'description',t.description,'createdAt',t.created_at,'amount',coalesce(sum(e.amount) FILTER(WHERE a.kind='available'),0),'heldAmount',coalesce(sum(e.amount) FILTER(WHERE a.kind='held'),0),'giftHeldAmount',coalesce(sum(e.amount) FILTER(WHERE a.kind='gift_held'),0),'debtAmount',coalesce(sum(e.amount) FILTER(WHERE a.kind='debt'),0),'unit','xu') FROM wallet_transactions t JOIN wallet_entries e ON e.transaction_id=t.id JOIN wallet_accounts a ON a.id=e.account_id WHERE a.user_id=$1 GROUP BY t.id ORDER BY t.created_at DESC,t.id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o)
 		})
 		r.Get("/orders", func(w http.ResponseWriter, r *http.Request) {
 			l, o := page(r)
@@ -379,8 +379,7 @@ func (s *Server) customerRoutes(r chi.Router) {
 		})
 		r.Get("/affiliate-links", func(w http.ResponseWriter, r *http.Request) {
 			l, o := page(r)
-			saved := r.URL.Query().Get("saved") == "true"
-			s.list(w, r, `SELECT jsonb_build_object('id',id,'channel',channel,'originalUrl',original_url,'affiliateUrl',affiliate_url,'trackingCode',tracking_code,'saved',saved,'createdAt',created_at,'policyId',policy_id,'tierCode',tier_code,'minSharePercent',min_share_bps::numeric/100,'maxSharePercent',max_share_bps::numeric/100) FROM affiliate_links WHERE user_id=$1 AND (NOT $4::boolean OR saved) ORDER BY created_at DESC,id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o, saved)
+			s.list(w, r, `SELECT jsonb_build_object('id',id,'channel',channel,'originalUrl',original_url,'affiliateUrl',affiliate_url,'trackingCode',tracking_code,'createdAt',created_at,'policyId',policy_id,'tierCode',tier_code,'minSharePercent',min_share_bps::numeric/100,'maxSharePercent',max_share_bps::numeric/100) FROM affiliate_links WHERE user_id=$1 ORDER BY created_at DESC,id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o)
 		})
 		r.Post("/affiliate-links", func(w http.ResponseWriter, r *http.Request) {
 			var p struct {
@@ -396,19 +395,6 @@ func (s *Server) customerRoutes(r chi.Router) {
 			}
 			s.reply(w, r, 201, v, e)
 		})
-		r.Patch("/affiliate-links/{id}", func(w http.ResponseWriter, r *http.Request) {
-			var p struct {
-				Saved bool `json:"saved"`
-			}
-			if !s.body(w, r, &p) {
-				return
-			}
-			tag, e := s.Store.Pool.Exec(r.Context(), `UPDATE affiliate_links SET saved=$3 WHERE id=$1 AND user_id=$2`, chi.URLParam(r, "id"), user(r).ID, p.Saved)
-			if e == nil && tag.RowsAffected() == 0 {
-				e = platform.Fail(404, "NOT_FOUND", "Không có link này.")
-			}
-			s.reply(w, r, 200, p, e)
-		})
 		r.Get("/withdrawals", s.withdrawalList(false))
 		r.Post("/withdrawals", func(w http.ResponseWriter, r *http.Request) {
 			var p wallet.WithdrawalInput
@@ -419,7 +405,7 @@ func (s *Server) customerRoutes(r chi.Router) {
 			s.reply(w, r, 201, v, e)
 		})
 		r.Get("/checkins", func(w http.ResponseWriter, r *http.Request) {
-			s.one(w, r, `SELECT jsonb_build_object('available',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'),'unit','xu','streak',streak,'best',best,'lastDay',last_day,'today',$2::text,'checkedIn',last_day=$2::date,'days',coalesce((SELECT jsonb_agg(day ORDER BY day) FROM checkins WHERE user_id=$1 AND day>=($2::date-30)),'[]')) FROM coin_accounts WHERE user_id=$1`, user(r).ID, rewards.LocalDay(time.Now()))
+			s.one(w, r, `SELECT jsonb_build_object('available',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'),'unit','xu','streak',streak,'best',best,'lastDay',last_day,'today',$2::text,'checkedIn',coalesce(last_day=$2::date,false),'days',coalesce((SELECT jsonb_agg(day ORDER BY day) FROM checkins WHERE user_id=$1 AND day>=($2::date-30)),'[]')) FROM coin_accounts WHERE user_id=$1`, user(r).ID, rewards.LocalDay(time.Now()))
 		})
 		r.Post("/checkins", func(w http.ResponseWriter, r *http.Request) {
 			v, e := (&rewards.Service{Store: s.Store}).Checkin(r.Context(), user(r).ID)

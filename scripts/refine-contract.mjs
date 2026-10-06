@@ -37,7 +37,6 @@ const requests = {
  'post /product-checks':define('ProductCheckInput',obj({url})),
  'post /shopee/check':{$ref:'#/components/schemas/ProductCheckInput'},
  'post /affiliate-links':{$ref:'#/components/schemas/ProductCheckInput'},
- 'patch /affiliate-links/{id}':define('LinkUpdate',obj({saved:bool})),
  'post /withdrawals':define('WithdrawalInput',obj({amount:{...num(50000),multipleOf:1000},bank:str(2,80),account:{...str(6,20),pattern:'^[0-9]{6,20}$'},holder:str(2,80)})),
  'post /coin-exchanges':define('CoinExchangeInput',obj({coins:{...num(10,1000000),multipleOf:10}})),
  'post /gift-redemptions':define('GiftRedemptionInput',obj({giftId:str(1,80)})),
@@ -48,7 +47,7 @@ const requests = {
  'post /admin/orders':define('ManualOrderInput',obj({trackingCode:str(1,100),channel,publisher:str(1,100),externalId:str(1,100),lineId:str(1,100),productName:str(1,200),value:num(),commission:num(),evidence:reason})),
  'post /admin/orders/{id}/events':define('OrderEventInput',obj({action:choice('approved','rejected','adjustment'),reason:str(0,500),commission:num()},['action'])),
  'post /admin/withdrawals/{id}/events':define('WithdrawalEventInput',obj({action:choice('processing','paid','rejected'),reason:str(0,500),bankReference:str(0,100),evidenceId:uuid},['action'])),
- 'patch /admin/gifts/{id}':define('GiftUpdate',obj({name:str(1,80),cost:num(1,1000000),stock:num(0,100000),active:bool})),
+ 'patch /admin/gifts/{id}':define('GiftUpdate',obj({name:str(1,80),costXu:num(1,1000000),stock:num(0,100000),active:bool})),
  'post /admin/gift-redemptions/{id}/events':define('GiftEventInput',obj({action:choice('completed','rejected'),code:str(0,500),reason:str(0,500)},['action'])),
  'post /admin/deals/{id}/events':define('ModerationInput',obj({action:choice('hide','show','delete'),reason})),
  'post /admin/notifications':define('NotificationInput',obj({recipientId:{...str(0,36),description:'Empty string broadcasts to customers.'},title:str(1,80),body:str(1,1000)},['title','body'])),
@@ -73,15 +72,17 @@ for(const p of ['/admin/browser/session-checks']){
 }
 const status=choice('pending','approved','rejected');
 define('Order',obj({id:uuid,userId:uuid,name:str(),channel,productName:str(),value:num(),commission:num(),cashback:num(),status,sourceStatus:status,orderedAt:time,externalId:str(),lineId:str(),publisher:str()}));
-define('Wallet',obj({available:num(),held:num(),debt:num()}));
+define('Wallet',obj({available:num(),held:num(),giftHeld:num(),debt:num(),unit:choice('xu')}));
 define('AffiliateChannel',obj({id:channel,name:str(),status:choice('demo','not_configured','available','temporarily_unavailable')}));
-define('AffiliateLink',obj({id:uuid,channel,originalUrl:url,affiliateUrl:url,trackingCode:str(),saved:bool,createdAt:time}));
+define('AffiliateLink',obj({id:uuid,channel,originalUrl:url,affiliateUrl:url,trackingCode:str(),createdAt:time}));
 define('Deal',obj({id:uuid,body:str(),channel,name:str(),createdAt:time,likes:num()}));
-define('Gift',obj({id:str(),name:str(),channel,cost:num(),stock:num(),active:bool}));
+define('Gift',obj({id:str(),name:str(),channel,costXu:num(),costUnit:choice('xu'),stock:num(),active:bool}));
 define('Notification',obj({id:uuid,title:str(),body:str(),createdAt:time,read:bool}));
-define('Transaction',obj({id:uuid,description:str(),amount:{type:'integer',format:'int64',nullable:true},createdAt:time}));
+const signedAmount={type:'integer',format:'int64'};
+define('Transaction',obj({id:uuid,description:str(),amount:signedAmount,heldAmount:signedAmount,giftHeldAmount:signedAmount,debtAmount:signedAmount,unit:choice('xu'),createdAt:time}));
+define('LegacyCoinTransaction',obj({id:uuid,description:str(),amount:signedAmount,equivalentXu:signedAmount,unit:choice('legacy_coin'),createdAt:time}));
 define('Withdrawal',obj({id:uuid,userId:uuid,name:str(),bank:str(),account:str(),holder:str(),amount:num(),status:choice('pending','processing','paid','rejected'),createdAt:time,processorId:{...uuid,nullable:true},bankReference:{...str(),nullable:true},evidenceId:{...uuid,nullable:true},reason:{...str(),nullable:true}}));
-define('GiftRedemption',obj({id:uuid,userId:uuid,name:str(),giftName:str(),giftId:str(),cost:num(),status:choice('pending','completed','rejected'),code:{...str(),nullable:true},reason:{...str(),nullable:true},createdAt:time}));
+define('GiftRedemption',obj({id:uuid,userId:uuid,name:str(),giftName:str(),giftId:str(),costXu:num(),costUnit:choice('xu','legacy_coin'),legacyCost:{...num(),nullable:true},status:choice('pending','completed','rejected'),code:{...str(),nullable:true},reason:{...str(),nullable:true},createdAt:time},['id','userId','name','giftName','giftId','costXu','costUnit','legacyCost','status','reason','createdAt']));
 Object.assign(schemas.Order.properties,{policyId:uuid,tierCode:{...tierCode,nullable:true},sharePercent});
 schemas.Order.required=[...new Set([...schemas.Order.required,'policyId','tierCode','sharePercent'])];
 Object.assign(schemas.AffiliateLink.properties,{policyId:uuid,tierCode:{...tierCode,nullable:true},minSharePercent:sharePercent,maxSharePercent:sharePercent});
@@ -93,14 +94,14 @@ const manualOrder=define('ManualOrderCreated',obj({id:uuid,tierCode:{...tierCode
 doc.paths['/admin/orders'].post.responses['201']={description:'Recorded order with its persisted sampled rate; no wallet credit until approval',content:{'application/json':{schema:obj({data:manualOrder,meta:{$ref:'#/components/schemas/Meta'}})}}};
 delete doc.paths['/admin/orders'].post.responses['200'];
 const membership=define('Membership',obj({policyId:uuid,tierCode,minApprovedOrders:num(),minSharePercent:sharePercent,maxSharePercent:sharePercent,approvedOrders:num(),nextTier:{allOf:[cashbackTier],nullable:true},ordersToNext:num()}));
-const dashboard=define('Dashboard',obj({pending:num(),approved:num(),approvedOrders:num(),available:num(),held:num(),debt:num(),coins:num(),membership}));
+const dashboard=define('Dashboard',obj({pending:num(),approved:num(),approvedOrders:num(),available:num(),held:num(),giftHeld:num(),debt:num(),totalOrders:num(),pendingOrders:num(),rejectedOrders:num(),unit:choice('xu'),membership}));
 define('Meta',obj({requestId:str(),hasNext:bool,nextCursor:{...str(0,512),nullable:true}},['requestId']));
 schemas.Error.properties.error.properties.details={type:'array',items:{type:'object',additionalProperties:true}};
 const reads={
  '/me/dashboard':dashboard,
  '/me':{$ref:'#/components/schemas/User'},'/wallet':{$ref:'#/components/schemas/Wallet'},'/orders':arr({$ref:'#/components/schemas/Order'}),'/orders/{id}':{$ref:'#/components/schemas/Order'},'/admin/orders':arr({$ref:'#/components/schemas/Order'}),
  '/affiliate-channels':arr({$ref:'#/components/schemas/AffiliateChannel'}),'/affiliate-links':arr({$ref:'#/components/schemas/AffiliateLink'}),'/deals':arr({$ref:'#/components/schemas/Deal'}),'/gifts':arr({$ref:'#/components/schemas/Gift'}),'/admin/gifts':arr({$ref:'#/components/schemas/Gift'}),'/notifications':arr({$ref:'#/components/schemas/Notification'}),
- '/wallet/transactions':arr({$ref:'#/components/schemas/Transaction'}),'/coins/transactions':arr({$ref:'#/components/schemas/Transaction'}),'/withdrawals':arr({$ref:'#/components/schemas/Withdrawal'}),'/admin/withdrawals':arr({$ref:'#/components/schemas/Withdrawal'}),'/gift-redemptions':arr({$ref:'#/components/schemas/GiftRedemption'}),
+ '/wallet/transactions':arr({$ref:'#/components/schemas/Transaction'}),'/coins/transactions':arr({$ref:'#/components/schemas/LegacyCoinTransaction'}),'/withdrawals':arr({$ref:'#/components/schemas/Withdrawal'}),'/admin/withdrawals':arr({$ref:'#/components/schemas/Withdrawal'}),'/gift-redemptions':arr({$ref:'#/components/schemas/GiftRedemption'}),
 };
 const cursorPaths=new Set(['/orders','/affiliate-links','/coins/transactions','/wallet/transactions','/notifications','/deals','/withdrawals','/gift-redemptions']);
 const lists=new Set([...cursorPaths,...Object.keys(doc.paths).filter(p=>p.startsWith('/admin/')&&['/orders','/users','/internal-accounts','/withdrawals','/gift-redemptions','/deals','/notifications','/audit-logs','/order-imports'].some(s=>p==='/admin'+s)),'/admin/order-imports/{id}/rows']);
@@ -110,7 +111,7 @@ for(const [p,methods] of Object.entries(doc.paths)) for(const [m,op] of Object.e
  const key=m+' '+p;
  op.summary=m.toUpperCase()+' '+p;
  if(!op.parameters?.some(v=>v.name==='Accept-Language'))(op.parameters||=[]).push({name:'Accept-Language',in:'header',required:false,schema:{type:'string',enum:['vi','en']},description:'Error message language. Defaults to Vietnamese; error codes stay unchanged.'});
- op.parameters=(op.parameters||[]).filter(param=>param.name!=='X-CSRF-Token'&&(param.in!=='query'||(lists.has(p)&&['page','perPage','cursor','status','saved','q'].includes(param.name))||(['/leaderboards','/me/leaderboard'].includes(p)&&param.name==='period')));
+ op.parameters=(op.parameters||[]).filter(param=>param.name!=='X-CSRF-Token'&&(param.in!=='query'||(lists.has(p)&&['page','perPage','cursor','status','q'].includes(param.name))||(['/leaderboards','/me/leaderboard'].includes(p)&&param.name==='period')));
  if(cursorPaths.has(p)&&m==='get'&&!op.parameters.some(v=>v.name==='cursor'))op.parameters.push({name:'cursor',in:'query',schema:str(0,512),description:'Opaque nextCursor from the previous response; takes precedence over page.'});
  for(const param of op.parameters){if(param.in==='path'&&param.name==='id'&&!p.includes('/admin/gifts/')&&!p.includes('/affiliate-channels/'))param.schema=uuid;}
  if(m!=='get'){
@@ -130,6 +131,8 @@ for(const [p,methods] of Object.entries(doc.paths)) for(const [m,op] of Object.e
  if(p==='/private-files/{id}')op.responses['200']={description:'Private file, delivered as attachment after checking ownership or permission.',content:{'application/octet-stream':{schema:{type:'string',format:'binary'}}}};
  if(p==='/admin/private-files'&&m==='post')delete op.requestBody.content['multipart/form-data'].schema.properties.mapping;
 }
-for(const [p,names] of Object.entries({'/orders':['status'],'/admin/orders':['status'],'/affiliate-links':['saved'],'/admin/users':['q']}))for(const name of names){const op=doc.paths[p].get;if(!op.parameters.some(v=>v.name===name))op.parameters.push({name,in:'query',schema:name==='saved'?bool:str()});}
+for(const [p,names] of Object.entries({'/orders':['status'],'/admin/orders':['status'],'/admin/users':['q']}))for(const name of names){const op=doc.paths[p].get;if(!op.parameters.some(v=>v.name===name))op.parameters.push({name,in:'query',schema:str()});}
 doc.info.description='Windows local PostgreSQL API. Google-only customer identities; provisioned internal accounts. No public registration. Financial commands are transactional and idempotent. Money amounts are integer VND, dates UTC except check-ins in Asia/Ho_Chi_Minh. Recent password authentication is required for money, account resets and policy changes. Unsupported affiliate integrations remain demo/unavailable.';
+schemas.BrowserStatus.properties.lastFailure={...obj({code:str(),phase:str(),at:time}),nullable:true};
+schemas.BrowserStatus.required=[...new Set([...schemas.BrowserStatus.required,'lastFailure'])];
 fs.writeFileSync(path,JSON.stringify(doc,null,2)+'\n');

@@ -2,6 +2,8 @@
 
 Development `.env` and production `env.prod` use the same Supabase database through the shared session pooler on port 5432. The connection and encryption key are private and ignored by Git. Local development retains its local origin, port and cookie settings; production uses the Vercel origin and secure cookies.
 
+The local runtime profile `.env.local`, selected by `scripts/dev-local.ps1`, also uses this shared Supabase database. Its `DATABASE_URL`, `MIGRATION_DATABASE_URL` and `DATA_ENCRYPTION_KEY` match `.env`; browser settings, localhost origin and cookie settings retain their local values. Writes through the localhost application therefore affect the same data as the online application. `TEST_DATABASE_URL` remains a separate local test database.
+
 The application tables live in the private `hoanxu` schema. Both `DATABASE_URL` and `MIGRATION_DATABASE_URL` include `sslmode=require&search_path=hoanxu%2Cextensions%2Cpublic`. Preserve this search path when updating either URL. The `extensions` schema provides Supabase's installed pgcrypto functions.
 
 Migration 10 remains in the applied migration history. Its private `browser_credentials` table is retained, but the API no longer reads or writes Shopee cookies there. Shopee uses manual sign-in in the managed Chrome profile. The Affiliate ID entered in admin is saved in `affiliate_channels.settings`. Apply all migrations with the Go migration runner before deploying against another database. Application tables have RLS enabled; the database owner used by the backend can access them, while Supabase's public API roles have no access to the schema, tables, sequences or functions. Do not add `hoanxu` to the Data API's exposed schemas. The frontend accesses data through the Go API.

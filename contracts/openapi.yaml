@@ -2526,7 +2526,7 @@
             }
           },
           "429": {
-            "description": "Rate limited",
+            "description": "Application rate limit, QUEUE_FULL or SHOPEE_RATE_LIMITED. Wait before retrying.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2536,7 +2536,27 @@
             }
           },
           "503": {
-            "description": "Dependency not configured or unavailable",
+            "description": "BROWSER_UNAVAILABLE, SHOPEE_LOGIN_REQUIRED, SHOPEE_VERIFICATION_REQUIRED or queue/configuration unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "SHOPEE_RESPONSE_NOT_OBSERVED, SHOPEE_UPSTREAM_FAILED or SHOPEE_RESPONSE_INVALID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "SHOPEE_TIMEOUT: product request was observed but did not finish within the deadline.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2556,7 +2576,8 @@
             }
           }
         },
-        "summary": "POST /product-checks"
+        "summary": "POST /product-checks",
+        "description": "Checker errors: 503 BROWSER_UNAVAILABLE / SHOPEE_LOGIN_REQUIRED / SHOPEE_VERIFICATION_REQUIRED; 502 SHOPEE_RESPONSE_NOT_OBSERVED / SHOPEE_UPSTREAM_FAILED / SHOPEE_RESPONSE_INVALID; 429 SHOPEE_RATE_LIMITED; 504 SHOPEE_TIMEOUT. Client retries are explicit."
       }
     },
     "/shopee/check": {
@@ -2673,7 +2694,7 @@
             }
           },
           "429": {
-            "description": "Rate limited",
+            "description": "Application rate limit, QUEUE_FULL or SHOPEE_RATE_LIMITED. Wait before retrying.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2683,7 +2704,27 @@
             }
           },
           "503": {
-            "description": "Dependency not configured or unavailable",
+            "description": "BROWSER_UNAVAILABLE, SHOPEE_LOGIN_REQUIRED, SHOPEE_VERIFICATION_REQUIRED or queue/configuration unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "SHOPEE_RESPONSE_NOT_OBSERVED, SHOPEE_UPSTREAM_FAILED or SHOPEE_RESPONSE_INVALID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "SHOPEE_TIMEOUT: product request was observed but did not finish within the deadline.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2703,7 +2744,8 @@
             }
           }
         },
-        "summary": "POST /shopee/check"
+        "summary": "POST /shopee/check",
+        "description": "Checker errors: 503 BROWSER_UNAVAILABLE / SHOPEE_LOGIN_REQUIRED / SHOPEE_VERIFICATION_REQUIRED; 502 SHOPEE_RESPONSE_NOT_OBSERVED / SHOPEE_UPSTREAM_FAILED / SHOPEE_RESPONSE_INVALID; 429 SHOPEE_RATE_LIMITED; 504 SHOPEE_TIMEOUT. Client retries are explicit."
       }
     },
     "/affiliate-links": {
@@ -2745,13 +2787,6 @@
               "maxLength": 512
             },
             "description": "Opaque nextCursor from the previous response; takes precedence over page."
-          },
-          {
-            "name": "saved",
-            "in": "query",
-            "schema": {
-              "type": "boolean"
-            }
           },
           {
             "name": "Accept-Language",
@@ -3009,162 +3044,6 @@
           }
         },
         "summary": "POST /affiliate-links"
-      }
-    },
-    "/affiliate-links/{id}": {
-      "patch": {
-        "operationId": "patch__affiliate_links__id_",
-        "tags": [
-          "Customer"
-        ],
-        "security": [
-          {
-            "session": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "vi",
-                "en"
-              ]
-            },
-            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
-          },
-          {
-            "name": "X-CSRF-Token",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 0,
-              "maxLength": 500
-            },
-            "description": "Token from GET /me; Origin must match the configured frontend."
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data",
-                    "meta"
-                  ],
-                  "properties": {
-                    "data": {},
-                    "meta": {
-                      "type": "object",
-                      "properties": {
-                        "requestId": {
-                          "type": "string"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid JSON",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Login required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Permission, CSRF or reauthentication failure",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "State or idempotency conflict",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation failure",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limited",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Dependency not configured or unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LinkUpdate"
-              }
-            }
-          }
-        },
-        "summary": "PATCH /affiliate-links/{id}"
       }
     },
     "/orders": {
@@ -4384,7 +4263,7 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/Transaction"
+                        "$ref": "#/components/schemas/LegacyCoinTransaction"
                       }
                     },
                     "meta": {
@@ -9080,24 +8959,24 @@
                         "remoteAvailable": {
                           "type": "boolean"
                         },
-                        "browser": {
-                          "$ref": "#/components/schemas/BrowserStatus"
+                        "localAvailable": {
+                          "type": "boolean"
                         },
                         "publisher": {
                           "type": "string",
+                          "minLength": 0,
                           "maxLength": 32
                         },
-                        "localAvailable": {
-                          "type": "boolean",
-                          "description": "Administrator only, when the API is bound to loopback and remote display is disabled."
+                        "browser": {
+                          "$ref": "#/components/schemas/BrowserStatus"
                         }
                       },
                       "required": [
                         "enabled",
                         "trackingVerified",
                         "remoteAvailable",
-                        "publisher",
-                        "localAvailable"
+                        "localAvailable",
+                        "publisher"
                       ]
                     },
                     "meta": {
@@ -10539,6 +10418,8 @@
             "session": []
           }
         ],
+        "deprecated": true,
+        "description": "Retired. Open server Chrome for manual sign-in; cookie imports are no longer supported.",
         "responses": {
           "401": {
             "description": "Session required",
@@ -10551,7 +10432,7 @@
             }
           },
           "403": {
-            "description": "Settings permission and CSRF validation required",
+            "description": "Settings permission and CSRF required",
             "content": {
               "application/json": {
                 "schema": {
@@ -10561,7 +10442,7 @@
             }
           },
           "410": {
-            "description": "Cookie import removed; open server Chrome to sign in.",
+            "description": "Cookie import removed",
             "content": {
               "application/json": {
                 "schema": {
@@ -10571,7 +10452,6 @@
             }
           }
         },
-        "description": "Retired. Manual sign-in in server Chrome replaces cookie imports. Authenticated settings users receive 410; no cookies are read or saved.",
         "summary": "PUT /admin/browser/cookies",
         "parameters": [
           {
@@ -10598,8 +10478,7 @@
             },
             "description": "Token from GET /me; Origin must match the configured frontend."
           }
-        ],
-        "deprecated": true
+        ]
       }
     },
     "/admin/browser/session-checks": {
@@ -10611,7 +10490,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Probes the running browser after manual sign-in; never starts Chrome or imports saved cookies.",
+            "description": "Probes the existing browser session after manual sign-in. Never starts Chrome or imports saved cookies.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11158,7 +11037,7 @@
             "session": []
           }
         ],
-        "description": "Administrator only; requires CSRF and recent password authentication. Starts headed Chromium and issues a one-use ticket for a browser display session of at most 10 minutes. Underlying account/session revocation also revokes display access. On loopback development servers with no remote display, opens the native Chrome window and returns local=true instead of a display ticket.",
+        "description": "Administrator only; requires CSRF and recent password authentication. Starts headed Chromium and issues a one-use ticket for a browser display session of at most 10 minutes. Underlying account/session revocation also revokes display access. On loopback development servers without remote display, opens native Chrome and returns local=true.",
         "responses": {
           "201": {
             "description": "Remote browser access ticket",
@@ -11267,48 +11146,29 @@
             "session": []
           }
         ],
-        "description": "Settings permission, CSRF and recent password authentication required. Stores the Affiliate ID in database configuration without enabling tracking. An empty ID clears it.",
-        "parameters": [
-          {
-            "name": "X-CSRF-Token",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PublisherInput"
-              }
-            }
-          }
-        },
+        "description": "Saves the Shopee Affiliate ID in channel settings. Requires settings permission, CSRF and recent password authentication; does not enable tracking.",
         "responses": {
           "200": {
-            "description": "Publisher saved",
+            "description": "Saved Affiliate ID",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": false,
                   "properties": {
                     "data": {
                       "type": "object",
+                      "additionalProperties": false,
                       "properties": {
                         "publisher": {
                           "type": "string",
-                          "maxLength": 32,
-                          "pattern": "^[0-9]*$"
+                          "minLength": 0,
+                          "maxLength": 32
                         }
                       },
                       "required": [
                         "publisher"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     "meta": {
                       "$ref": "#/components/schemas/Meta"
@@ -11333,7 +11193,7 @@
             }
           },
           "403": {
-            "description": "Settings permission, CSRF or recent password authentication required",
+            "description": "Settings permission, CSRF and recent authentication required",
             "content": {
               "application/json": {
                 "schema": {
@@ -11349,6 +11209,43 @@
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
+              }
+            }
+          }
+        },
+        "summary": "PUT /admin/browser/publisher",
+        "parameters": [
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 500
+            },
+            "description": "Token from GET /me; Origin must match the configured frontend."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublisherInput"
               }
             }
           }
@@ -11585,18 +11482,6 @@
         },
         "required": [
           "url"
-        ]
-      },
-      "LinkUpdate": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "saved": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "saved"
         ]
       },
       "WithdrawalInput": {
@@ -11927,7 +11812,7 @@
             "minLength": 1,
             "maxLength": 80
           },
-          "cost": {
+          "costXu": {
             "type": "integer",
             "format": "int64",
             "minimum": 1,
@@ -11945,7 +11830,7 @@
         },
         "required": [
           "name",
-          "cost",
+          "costXu",
           "stock",
           "active"
         ]
@@ -12260,17 +12145,31 @@
             "minimum": 0,
             "maximum": 1000000000000
           },
+          "giftHeld": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
           "debt": {
             "type": "integer",
             "format": "int64",
             "minimum": 0,
             "maximum": 1000000000000
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "xu"
+            ]
           }
         },
         "required": [
           "available",
           "held",
-          "debt"
+          "giftHeld",
+          "debt",
+          "unit"
         ]
       },
       "AffiliateChannel": {
@@ -12341,9 +12240,6 @@
             "minLength": 0,
             "maxLength": 500
           },
-          "saved": {
-            "type": "boolean"
-          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -12380,7 +12276,6 @@
           "originalUrl",
           "affiliateUrl",
           "trackingCode",
-          "saved",
           "createdAt",
           "policyId",
           "tierCode",
@@ -12458,11 +12353,17 @@
               "tiki"
             ]
           },
-          "cost": {
+          "costXu": {
             "type": "integer",
             "format": "int64",
             "minimum": 0,
             "maximum": 1000000000000
+          },
+          "costUnit": {
+            "type": "string",
+            "enum": [
+              "xu"
+            ]
           },
           "stock": {
             "type": "integer",
@@ -12478,7 +12379,8 @@
           "id",
           "name",
           "channel",
-          "cost",
+          "costXu",
+          "costUnit",
           "stock",
           "active"
         ]
@@ -12532,8 +12434,25 @@
           },
           "amount": {
             "type": "integer",
-            "format": "int64",
-            "nullable": true
+            "format": "int64"
+          },
+          "heldAmount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "giftHeldAmount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "debtAmount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "xu"
+            ]
           },
           "createdAt": {
             "type": "string",
@@ -12544,6 +12463,10 @@
           "id",
           "description",
           "amount",
+          "heldAmount",
+          "giftHeldAmount",
+          "debtAmount",
+          "unit",
           "createdAt"
         ]
       },
@@ -12664,11 +12587,25 @@
             "minLength": 0,
             "maxLength": 500
           },
-          "cost": {
+          "costXu": {
             "type": "integer",
             "format": "int64",
             "minimum": 0,
             "maximum": 1000000000000
+          },
+          "costUnit": {
+            "type": "string",
+            "enum": [
+              "xu",
+              "legacy_coin"
+            ]
+          },
+          "legacyCost": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000,
+            "nullable": true
           },
           "status": {
             "type": "string",
@@ -12701,9 +12638,10 @@
           "name",
           "giftName",
           "giftId",
-          "cost",
+          "costXu",
+          "costUnit",
+          "legacyCost",
           "status",
-          "code",
           "reason",
           "createdAt"
         ]
@@ -12805,6 +12743,28 @@
             "type": "string",
             "format": "date-time",
             "nullable": true
+          },
+          "lastFailure": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "phase",
+              "at"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "phase": {
+                "type": "string"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
           }
         },
         "required": [
@@ -12815,7 +12775,8 @@
           "pending",
           "workers",
           "starts",
-          "lastVerifiedAt"
+          "lastVerifiedAt",
+          "lastFailure"
         ]
       },
       "LeaderboardEntry": {
@@ -13167,17 +13128,41 @@
             "minimum": 0,
             "maximum": 1000000000000
           },
+          "giftHeld": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
           "debt": {
             "type": "integer",
             "format": "int64",
             "minimum": 0,
             "maximum": 1000000000000
           },
-          "coins": {
+          "totalOrders": {
             "type": "integer",
             "format": "int64",
             "minimum": 0,
             "maximum": 1000000000000
+          },
+          "pendingOrders": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "rejectedOrders": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "xu"
+            ]
           },
           "membership": {
             "$ref": "#/components/schemas/Membership"
@@ -13189,8 +13174,12 @@
           "approvedOrders",
           "available",
           "held",
+          "giftHeld",
           "debt",
-          "coins",
+          "totalOrders",
+          "pendingOrders",
+          "rejectedOrders",
+          "unit",
           "membership"
         ]
       },
@@ -13391,17 +13380,18 @@
       },
       "PublisherInput": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
           "publisher": {
             "type": "string",
+            "minLength": 0,
             "maxLength": 32,
             "pattern": "^[0-9]*$"
           }
         },
         "required": [
           "publisher"
-        ],
-        "additionalProperties": false
+        ]
       },
       "LocalBrowserAccess": {
         "type": "object",
@@ -13420,6 +13410,47 @@
         "required": [
           "local",
           "browser"
+        ]
+      },
+      "LegacyCoinTransaction": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 500
+          },
+          "amount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "equivalentXu": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "legacy_coin"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "description",
+          "amount",
+          "equivalentXu",
+          "unit",
+          "createdAt"
         ]
       }
     }

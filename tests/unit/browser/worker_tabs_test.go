@@ -28,7 +28,7 @@ window.addEventListener('popstate', route);
 route();
 </script></body>`
 
-func TestWarmWorkersReuseDocumentsAndRejectLateResponses(t *testing.T) {
+func TestWorkersReuseTabsAndRejectLateResponses(t *testing.T) {
 	for _, mode := range []string{"local", "remote"} {
 		t.Run(mode, func(t *testing.T) { warmWorkersReuseDocumentsAndRejectLateResponses(t, mode) })
 	}
@@ -112,7 +112,7 @@ func warmWorkersReuseDocumentsAndRejectLateResponses(t *testing.T, mode string) 
 		t.Fatal("worker not preloaded")
 	}
 	var boot string
-	if err := chromedp.Run(w.ctx, chromedp.Evaluate(`window.fixtureBoot`, &boot)); err != nil {
+	if err := chromedp.Run(w.ctx, chromedp.Navigate(server.URL+"/dashboard"), chromedp.Evaluate(`window.fixtureBoot`, &boot)); err != nil {
 		t.Fatal(err)
 	}
 	workerID := chromedp.FromContext(w.ctx).Target.TargetID
@@ -141,8 +141,8 @@ func warmWorkersReuseDocumentsAndRejectLateResponses(t *testing.T, mode string) 
 	if err := chromedp.Run(w.ctx, chromedp.Evaluate(`window.fixtureBoot`, &currentBoot)); err != nil {
 		t.Fatal(err)
 	}
-	if chromedp.FromContext(w.ctx).Target.TargetID != workerID || currentBoot != boot {
-		t.Fatal("worker reloaded or recreated the document between products")
+	if chromedp.FromContext(w.ctx).Target.TargetID != workerID || currentBoot == boot {
+		t.Fatal("worker must reuse the tab and navigate a fresh document between products")
 	}
 	put()
 	// Same-item refresh must trigger a fresh request rather than reusing the
@@ -170,7 +170,7 @@ func warmWorkersReuseDocumentsAndRejectLateResponses(t *testing.T, mode string) 
 	}
 }
 
-func TestWarmWorkerFallsBackWhenClientRouterDoesNotRequestProduct(t *testing.T) {
+func TestWorkerNavigatesWithoutClientRouter(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v3/offer/product" {
 			fmt.Fprint(w, `{"code":0,"data":{"item_id":"101"}}`)

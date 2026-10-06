@@ -33,9 +33,12 @@ func main() {
 }
 func run() error {
 	if len(os.Args) < 2 {
-		return errors.New("commands: migrate, create, reset, shopee-login, key")
+		return errors.New("commands: migrate, create, reset, shopee-login, key, import-legacy")
 	}
 	command := os.Args[1]
+	if command == "import-legacy" {
+		return importLegacy(os.Args[2:])
+	}
 	if command == "key" {
 		b := make([]byte, 32)
 		if _, e := rand.Read(b); e != nil {

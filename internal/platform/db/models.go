@@ -24,7 +24,6 @@ type AffiliateLink struct {
 	TrackingCode string
 	PolicyID     pgtype.UUID
 	ItemID       pgtype.Text
-	Saved        bool
 	CreatedAt    pgtype.Timestamptz
 	TierCode     pgtype.Text
 	MinShareBps  int32

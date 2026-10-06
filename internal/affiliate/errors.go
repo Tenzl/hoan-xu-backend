@@ -23,6 +23,14 @@ func checkError(err error) error {
 		return platform.Fail(429, "QUEUE_FULL", "Có quá nhiều lượt kiểm tra Shopee. Vui lòng thử lại sau.")
 	case "QUEUE_TIMEOUT":
 		return platform.Fail(503, "QUEUE_TIMEOUT", "Hàng đợi kiểm tra Shopee đang bận. Vui lòng thử lại sau.")
+	case "SHOPEE_RESPONSE_NOT_OBSERVED":
+		return platform.Fail(502, "SHOPEE_RESPONSE_NOT_OBSERVED", "Trang Shopee đã mở nhưng chưa gửi dữ liệu sản phẩm. Thử lại hoặc kiểm tra phiên trong quản trị.")
+	case "SHOPEE_UPSTREAM_FAILED":
+		return platform.Fail(502, "SHOPEE_UPSTREAM_FAILED", "Shopee không trả được dữ liệu sản phẩm. Vui lòng thử lại sau.")
+	case "SHOPEE_RATE_LIMITED":
+		return platform.Fail(429, "SHOPEE_RATE_LIMITED", "Shopee đang giới hạn truy cập. Chờ một lúc trước khi thử lại.")
+	case "SHOPEE_TIMEOUT":
+		return platform.Fail(504, "SHOPEE_TIMEOUT", "Shopee chưa trả xong dữ liệu sản phẩm trong thời gian cho phép. Vui lòng thử lại.")
 	case "SHOPEE_RESPONSE_INVALID":
 		return platform.Fail(502, "SHOPEE_RESPONSE_INVALID", "Dữ liệu sản phẩm Shopee không hợp lệ. Vui lòng thử lại sau.")
 	default:

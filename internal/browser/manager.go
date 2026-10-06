@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
-	"log/slog"
 	"net/url"
 	"strings"
 	"sync"
@@ -38,6 +36,7 @@ type Manager struct {
 	version         uint64
 	starts          int
 	lastVerified    *time.Time
+	lastFailure     *LastFailure
 	state           string
 	probeURL        string
 	offerBaseURL    string
@@ -291,10 +290,11 @@ func (m *Manager) Run(ctx context.Context) {
 						continue
 					}
 					close(j.started)
-					b, e := m.capture(ctx, j.ctx, j.item)
-					if e != nil && j.ctx.Err() == nil && e.Error() != "SHOPEE_LOGIN_REQUIRED" && e.Error() != "SHOPEE_VERIFICATION_REQUIRED" {
-						if deadline, ok := j.ctx.Deadline(); ok && time.Until(deadline) > 20*time.Second {
-							b, e = m.capture(ctx, j.ctx, j.item)
+					b, e := m.captureAttempt(ctx, j.ctx, j.item, 1)
+					var f *Failure
+					if errors.As(e, &f) && f.Retryable && j.ctx.Err() == nil {
+						if deadline, ok := j.ctx.Deadline(); ok && time.Until(deadline) >= 5*time.Second {
+							b, e = m.captureAttempt(ctx, j.ctx, j.item, 2)
 						}
 					}
 					j.result <- result{b, e}
@@ -346,11 +346,11 @@ func (m *Manager) Close() {
 func (m *Manager) Status() map[string]any {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.remoteURL != "" && !m.running() {
+	if (m.remoteURL != "" || m.root != nil) && !m.running() {
 		m.authenticated = false
 		m.state = "unavailable"
 	}
-	return map[string]any{"authenticated": m.authenticated, "pending": len(m.queue), "workers": 2, "browser": m.running(), "savedCookies": m.CookiesConfigured(), "state": m.state, "lastVerifiedAt": m.lastVerified, "starts": m.starts}
+	return map[string]any{"authenticated": m.authenticated, "pending": len(m.queue), "workers": 2, "browser": m.running(), "savedCookies": m.CookiesConfigured(), "state": m.state, "lastVerifiedAt": m.lastVerified, "starts": m.starts, "lastFailure": m.lastFailure}
 }
 func (m *Manager) probe(ctx context.Context) {
 	// Probes and interactive setup wait for both worker tabs to finish.
@@ -408,7 +408,7 @@ func (m *Manager) probeSession(ctx context.Context) {
 	}
 	state := sessionLocationState(location, m.probeURL)
 	if w != nil {
-		w.ready = e == nil && state == "authenticated" && waitForWorkerApp(tab) == nil
+		w.ready = e == nil && state == "authenticated"
 		w.item = ""
 		m.releaseWorker(w, w.ready)
 		if e == nil && state == "authenticated" {
@@ -551,7 +551,7 @@ func (m *Manager) PasteCookies(ctx context.Context, raw string) (map[string]any,
 }
 func (m *Manager) Check(ctx context.Context, item string) ([]byte, error) {
 	m.mu.Lock()
-	if m.remoteURL != "" && !m.running() {
+	if (m.remoteURL != "" || m.root != nil) && !m.running() {
 		m.authenticated = false
 		m.state = "unavailable"
 	}
@@ -570,7 +570,7 @@ func (m *Manager) Check(ctx context.Context, item string) ([]byte, error) {
 		}
 		return nil, errors.New("SHOPEE_LOGIN_REQUIRED")
 	}
-	request, cancel := context.WithCancel(ctx)
+	request, cancel := context.WithTimeout(ctx, 40*time.Second)
 	defer cancel()
 	j := job{ctx: request, item: item, result: make(chan result, 1), started: make(chan struct{})}
 	select {
@@ -581,266 +581,17 @@ func (m *Manager) Check(ctx context.Context, item string) ([]byte, error) {
 	wait := time.NewTimer(10 * time.Second)
 	defer wait.Stop()
 	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	case <-request.Done():
+		return nil, request.Err()
 	case <-wait.C:
 		return nil, errors.New("QUEUE_TIMEOUT")
 	case <-j.started:
 	}
 	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	case <-request.Done():
+		return nil, request.Err()
 	case r := <-j.result:
 		return r.Body, r.Err
-	}
-}
-func (m *Manager) capture(lifetime, request context.Context, item string) (bodyResult []byte, captureError error) {
-	started := time.Now()
-	var sessionWait, navigationTime time.Duration
-	var warmNavigation, navigationFallback bool
-	var mu sync.Mutex
-	productStartedMS, productHeadersMS, productReadyMS := int64(-1), int64(-1), int64(-1)
-	defer func() {
-		mu.Lock()
-		defer mu.Unlock()
-		slog.Info("shopee_browser_capture", "session_wait_ms", sessionWait.Milliseconds(), "navigation_ms", navigationTime.Milliseconds(), "warm_navigation", warmNavigation, "navigation_fallback", navigationFallback, "product_request_after_ms", productStartedMS, "product_headers_ms", productHeadersMS, "product_ready_after_ms", productReadyMS, "total_ms", time.Since(started).Milliseconds(), "success", captureError == nil)
-	}()
-	m.sessionMu.RLock()
-	sessionWait = time.Since(started)
-	defer m.sessionMu.RUnlock()
-	if m.remoteURL != "" {
-		m.mu.Lock()
-		ready := m.running() && m.authenticated
-		m.mu.Unlock()
-		if !ready {
-			return nil, errors.New("BROWSER_UNAVAILABLE")
-		}
-		defer func() {
-			m.mu.Lock()
-			defer m.mu.Unlock()
-			if captureError != nil && !m.running() {
-				m.authenticated = false
-				m.state = "unavailable"
-				captureError = errors.New("BROWSER_UNAVAILABLE")
-			}
-		}()
-	} else {
-		if e := m.start(lifetime); e != nil {
-			return nil, e
-		}
-	}
-	m.mu.Lock()
-	root := m.root
-	m.mu.Unlock()
-	var tab context.Context
-	navigationStarted := time.Now()
-	if m.workerTabs != nil {
-		w, err := m.acquireWorker(root, request)
-		if err != nil {
-			return nil, err
-		}
-		tab = w.ctx
-		warmNavigation = w.ready && w.item != item
-		defer func() {
-			w.ready = captureError == nil
-			w.item = item
-			m.releaseWorker(w, w.ready)
-		}()
-	} else {
-		var cancel context.CancelFunc
-		tab, cancel = chromedp.NewContext(root)
-		defer func() { cancel(); m.forgetTarget(tab) }()
-	}
-	tab, stop := context.WithTimeout(tab, 20*time.Second)
-	defer stop()
-	stopRequest := context.AfterFunc(request, stop)
-	defer stopRequest()
-	ids := make(chan network.RequestID, 8)
-	expired := make(chan struct{}, 1)
-	targets := map[network.RequestID]bool{}
-	var mainFrame cdp.FrameID
-	if warmNavigation {
-		if err := chromedp.Run(tab, chromedp.ActionFunc(func(ctx context.Context) error {
-			tree, err := page.GetFrameTree().Do(ctx)
-			if err == nil {
-				mainFrame = tree.Frame.ID
-			}
-			return err
-		})); err != nil {
-			return nil, err
-		}
-	}
-	checkLocation := func(location string) {
-		if location == "" || location == "about:blank" || strings.HasPrefix(location, "chrome-error://") {
-			return
-		}
-		state := sessionLocationState(location, m.offerBaseURL+item)
-		u, err := url.Parse(location)
-		if state != "verification_required" {
-			if err == nil && u.Host == m.responseHost && !strings.Contains(u.Path, "login") {
-				return
-			}
-			state = "login_required"
-		}
-		m.mu.Lock()
-		m.authenticated = false
-		m.state = state
-		m.mu.Unlock()
-		select {
-		case expired <- struct{}{}:
-		default:
-		}
-	}
-	chromedp.ListenTarget(tab, func(ev any) {
-		switch e := ev.(type) {
-		case *page.EventFrameNavigated:
-			if e.Frame.ParentID == "" {
-				mu.Lock()
-				mainFrame = e.Frame.ID
-				mu.Unlock()
-				checkLocation(e.Frame.URL)
-			}
-		case *page.EventNavigatedWithinDocument:
-			mu.Lock()
-			main := e.FrameID == mainFrame
-			mu.Unlock()
-			if main {
-				checkLocation(e.URL)
-			}
-		case *network.EventRequestWillBeSent:
-			u, err := url.Parse(e.Request.URL)
-			if err == nil && u.Host == m.responseHost && u.Path == "/api/v3/offer/product" && u.Query().Get("item_id") == item {
-				mu.Lock()
-				targets[e.RequestID] = false
-				productStartedMS = time.Since(started).Milliseconds()
-				mu.Unlock()
-			}
-		case *network.EventResponseReceived:
-			u, er := url.Parse(e.Response.URL)
-			if er == nil && u.Host == m.responseHost && strings.HasPrefix(u.Path, "/api/") && (e.Response.Status == 401 || e.Response.Status == 403) {
-				select {
-				case expired <- struct{}{}:
-				default:
-				}
-			}
-			if er == nil && u.Host == m.responseHost && u.Path == "/api/v3/offer/product" && u.Query().Get("item_id") == item && e.Response.Status == 200 {
-				mu.Lock()
-				_, current := targets[e.RequestID]
-				if current {
-					targets[e.RequestID] = true
-				}
-				if current && e.Response.Timing != nil {
-					productHeadersMS = int64(e.Response.Timing.ReceiveHeadersEnd)
-				}
-				mu.Unlock()
-			}
-		case *network.EventLoadingFinished:
-			mu.Lock()
-			ok := targets[e.RequestID]
-			delete(targets, e.RequestID)
-			if ok {
-				productReadyMS = time.Since(started).Milliseconds()
-			}
-			mu.Unlock()
-			if ok {
-				select {
-				case ids <- e.RequestID:
-				default:
-				}
-			}
-		}
-	})
-	// Navigate starts the page but does not wait for its load event: the product
-	// JSON can arrive while unrelated images or analytics are still loading.
-	fullNavigate := chromedp.ActionFunc(func(ctx context.Context) error {
-		_, _, errorText, _, err := page.Navigate(m.offerBaseURL + item).Do(ctx)
-		if err != nil {
-			return err
-		}
-		if errorText != "" {
-			return fmt.Errorf("page load error %s", errorText)
-		}
-		return nil
-	})
-	var navigation chromedp.Action = fullNavigate
-	if warmNavigation {
-		navigation = navigateWorker(m.offerBaseURL + item)
-	}
-	e := chromedp.Run(tab, m.trackTarget(), network.Enable(), navigation)
-	navigationTime = time.Since(navigationStarted)
-	if e != nil {
-		m.mu.Lock()
-		verification := m.state == "verification_required"
-		m.mu.Unlock()
-		if verification {
-			return nil, errors.New("SHOPEE_VERIFICATION_REQUIRED")
-		}
-		return nil, e
-	}
-	var fallback <-chan time.Time
-	if warmNavigation {
-		timer := time.NewTimer(3 * time.Second)
-		defer timer.Stop()
-		fallback = timer.C
-	}
-	for {
-		select {
-		case <-fallback:
-			fallback = nil
-			mu.Lock()
-			startedProduct := productStartedMS >= 0
-			mu.Unlock()
-			if !startedProduct {
-				// Sites without a working SPA route fall back to normal navigation.
-				navigationFallback = true
-				if err := chromedp.Run(tab, fullNavigate); err != nil {
-					return nil, err
-				}
-			}
-		case <-expired:
-			m.mu.Lock()
-			if m.state == "verification_required" {
-				m.mu.Unlock()
-				return nil, errors.New("SHOPEE_VERIFICATION_REQUIRED")
-			}
-			m.authenticated = false
-			m.state = "login_required"
-			m.mu.Unlock()
-			return nil, errors.New("SHOPEE_LOGIN_REQUIRED")
-		case <-tab.Done():
-			return nil, tab.Err()
-		case id := <-ids:
-			// A response and a session redirect may arrive together. Check the
-			// current document before accepting the product response.
-			var location string
-			if err := chromedp.Run(tab, chromedp.Location(&location)); err != nil {
-				return nil, err
-			}
-			state := sessionLocationState(location, m.offerBaseURL+item)
-			u, err := url.Parse(location)
-			if state == "verification_required" || err != nil || u.Host != m.responseHost || strings.Contains(u.Path, "login") {
-				m.mu.Lock()
-				m.authenticated = false
-				m.state = "login_required"
-				if state == "verification_required" {
-					m.state = state
-				}
-				m.mu.Unlock()
-				if state == "verification_required" {
-					return nil, errors.New("SHOPEE_VERIFICATION_REQUIRED")
-				}
-				return nil, errors.New("SHOPEE_LOGIN_REQUIRED")
-			}
-			var body []byte
-			e := chromedp.Run(tab, chromedp.ActionFunc(func(c context.Context) error { var er error; body, er = network.GetResponseBody(id).Do(c); return er }))
-			if e != nil {
-				return nil, e
-			}
-			if !json.Valid(body) || len(body) > 2*1024*1024 {
-				return nil, errors.New("SHOPEE_RESPONSE_INVALID")
-			}
-			return body, nil
-		}
 	}
 }
 

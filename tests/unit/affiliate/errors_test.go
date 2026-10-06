@@ -17,6 +17,11 @@ func TestCheckErrorsAreActionableAndDoNotExposeBrowserDetails(t *testing.T) {
 		{errors.New("SHOPEE_LOGIN_REQUIRED"), 503, "SHOPEE_LOGIN_REQUIRED"},
 		{context.DeadlineExceeded, 504, "SHOPEE_TIMEOUT"},
 		{errors.New("QUEUE_FULL"), 429, "QUEUE_FULL"},
+		{errors.New("SHOPEE_RESPONSE_NOT_OBSERVED"), 502, "SHOPEE_RESPONSE_NOT_OBSERVED"},
+		{errors.New("SHOPEE_UPSTREAM_FAILED"), 502, "SHOPEE_UPSTREAM_FAILED"},
+		{errors.New("SHOPEE_RATE_LIMITED"), 429, "SHOPEE_RATE_LIMITED"},
+		{errors.New("SHOPEE_TIMEOUT"), 504, "SHOPEE_TIMEOUT"},
+		{errors.New("SHOPEE_RESPONSE_INVALID"), 502, "SHOPEE_RESPONSE_INVALID"},
 		{errors.New("local secret details"), 503, "BROWSER_UNAVAILABLE"},
 	} {
 		var problem *platform.Error
