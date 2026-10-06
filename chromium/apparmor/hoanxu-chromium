@@ -1,0 +1,9 @@
+# Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor.
+# Load: sudo apparmor_parser -r chromium/apparmor/hoanxu-chromium
+# Namespace access is needed by Chromium's OS sandbox. This profile deliberately
+# does not add filesystem restrictions; container mounts/capabilities still apply.
+abi <abi/4.0>,
+include <tunables/global>
+profile hoanxu-chromium flags=(default_allow) {
+    userns,
+}

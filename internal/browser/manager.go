@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
+	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 	"net/url"
 	"strings"
@@ -38,6 +40,10 @@ type Manager struct {
 	probeURL        string
 	offerBaseURL    string
 	responseHost    string
+	remoteURL       string
+	retryAt         time.Time
+	retryDelay      time.Duration
+	ownedTargets    map[target.ID]bool
 	root            context.Context
 	cancel          context.CancelFunc
 	allocatorCancel context.CancelFunc
@@ -86,8 +92,8 @@ func (m *Manager) UsesManualLogin() bool   { return m.manualLogin }
 func (m *Manager) CookiesConfigured() bool { return m.cookies.Configured() }
 func (m *Manager) SessionVersion() uint64  { m.mu.Lock(); defer m.mu.Unlock(); return m.version }
 
-// OpenInteractive starts the persistent headed browser without requiring an
-// authenticated Shopee session: the administrator needs it to log in first.
+// OpenInteractive starts local Chrome or connects to the EC2 browser without
+// requiring a Shopee session: the administrator needs its display to log in.
 func (m *Manager) OpenInteractive() error {
 	m.mu.Lock()
 	life, headless := m.lifetime, m.headless
@@ -95,8 +101,8 @@ func (m *Manager) OpenInteractive() error {
 	if headless {
 		return errors.New("interactive browser requires CHROME_HEADLESS=false")
 	}
-	m.sessionMu.RLock()
-	defer m.sessionMu.RUnlock()
+	m.sessionMu.Lock()
+	defer m.sessionMu.Unlock()
 	err := m.start(life)
 	if err != nil {
 		// An unreachable dashboard must not prevent manual recovery when
@@ -122,21 +128,62 @@ func (m *Manager) start(ctx context.Context) error {
 	if m.allocatorCancel != nil {
 		m.allocatorCancel()
 	}
-	opts := append([]chromedp.ExecAllocatorOption{}, chromedp.DefaultExecAllocatorOptions[:]...)
-	opts = append(opts, chromedp.UserDataDir(m.profile), chromedp.WSURLReadTimeout(10*time.Second), chromedp.Flag("headless", m.headless))
-	if m.path != "" {
-		opts = append(opts, chromedp.ExecPath(m.path))
+	var alloc context.Context
+	var ac context.CancelFunc
+	if m.remoteURL != "" {
+		if time.Now().Before(m.retryAt) {
+			return errors.New("BROWSER_UNAVAILABLE")
+		}
+		ws, err := remoteWebSocket(ctx, m.remoteURL)
+		if err != nil {
+			m.connectionFailed()
+			return errors.New("BROWSER_UNAVAILABLE")
+		}
+		alloc, ac = chromedp.NewRemoteAllocator(ctx, ws, chromedp.NoModifyURL)
+	} else {
+		opts := append([]chromedp.ExecAllocatorOption{}, chromedp.DefaultExecAllocatorOptions[:]...)
+		opts = append(opts, chromedp.UserDataDir(m.profile), chromedp.WSURLReadTimeout(10*time.Second), chromedp.Flag("headless", m.headless))
+		if m.path != "" {
+			opts = append(opts, chromedp.ExecPath(m.path))
+		}
+		alloc, ac = chromedp.NewExecAllocator(ctx, opts...)
 	}
-	alloc, ac := chromedp.NewExecAllocator(ctx, opts...)
 	root, rc := chromedp.NewContext(alloc)
+	// Bound the first connection without putting a deadline on its lifetime.
+	connectTimeout := 10 * time.Second
+	if m.remoteURL != "" {
+		// Remote target setup crosses the SSH tunnel several times. Allow for
+		// WAN latency and a cold renderer while keeping reconnects bounded.
+		connectTimeout = 30 * time.Second
+	}
+	timer := time.AfterFunc(connectTimeout, func() { ac() })
 	if e := chromedp.Run(root); e != nil {
+		timer.Stop()
 		rc()
 		ac()
+		if m.remoteURL != "" {
+			m.connectionFailed()
+			return errors.New("BROWSER_UNAVAILABLE")
+		}
 		return e
+	}
+	timer.Stop()
+	if m.remoteURL != "" {
+		// A broken tunnel cannot close old targets. On reattach, clean up only
+		// targets this controller created; never touch the native login tab.
+		cleanup, stopCleanup := context.WithTimeout(root, 5*time.Second)
+		browserCtx := cdp.WithExecutor(cleanup, chromedp.FromContext(root).Browser)
+		for id := range m.ownedTargets {
+			_ = target.CloseTarget(id).Do(browserCtx)
+		}
+		stopCleanup()
+		m.ownedTargets = map[target.ID]bool{chromedp.FromContext(root).Target.TargetID: true}
 	}
 	m.root = root
 	m.cancel = rc
 	m.allocatorCancel = ac
+	m.retryDelay = 0
+	m.retryAt = time.Time{}
 	m.starts++
 	if m.manualLogin {
 		m.version++
@@ -153,7 +200,7 @@ func (m *Manager) start(ctx context.Context) error {
 			}
 		}
 	}
-	if !m.headless {
+	if !m.headless && m.remoteURL == "" {
 		// Keep the root tab open for manual login/verification. Probe and check
 		// tabs can close without interrupting the user's interactive tab.
 		if e := chromedp.Run(root, chromedp.ActionFunc(func(c context.Context) error {
@@ -166,7 +213,36 @@ func (m *Manager) start(ctx context.Context) error {
 			return e
 		}
 	}
+	if m.remoteURL != "" {
+		go func() {
+			select {
+			case <-root.Done():
+			case <-chromedp.FromContext(root).Browser.LostConnection:
+			}
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			if m.root == root {
+				m.authenticated = false
+				m.state = "unavailable"
+			}
+		}()
+	}
 	return nil
+}
+
+// connectionFailed is called with mu held. EC2 outages never restart the API.
+func (m *Manager) connectionFailed() {
+	m.authenticated = false
+	m.state = "unavailable"
+	if m.retryDelay == 0 {
+		m.retryDelay = 5 * time.Second
+	} else {
+		m.retryDelay *= 2
+		if m.retryDelay > 30*time.Second {
+			m.retryDelay = 30 * time.Second
+		}
+	}
+	m.retryAt = time.Now().Add(m.retryDelay)
 }
 
 // A context may remain alive after the Chrome process exits; also check the CDP connection.
@@ -189,9 +265,15 @@ func (m *Manager) Run(ctx context.Context) {
 	m.mu.Lock()
 	m.lifetime = ctx
 	m.mu.Unlock()
-	defer m.Close()
+	var workers sync.WaitGroup
+	defer func() {
+		workers.Wait()
+		m.Close()
+	}()
 	for i := 0; i < 2; i++ {
+		workers.Add(1)
 		go func() {
+			defer workers.Done()
 			for {
 				select {
 				case <-ctx.Done():
@@ -212,7 +294,11 @@ func (m *Manager) Run(ctx context.Context) {
 			}
 		}()
 	}
-	ticker := time.NewTicker(10 * time.Minute)
+	interval := 10 * time.Minute
+	if m.remoteURL != "" {
+		interval = 5 * time.Second
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	if m.autoStart || m.CookiesConfigured() {
 		m.probe(ctx)
@@ -222,6 +308,14 @@ func (m *Manager) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if m.remoteURL != "" {
+				m.mu.Lock()
+				due := !m.running() || m.state == "unavailable" || m.lastVerified == nil || time.Since(*m.lastVerified) >= 10*time.Minute
+				m.mu.Unlock()
+				if !due {
+					continue
+				}
+			}
 			if m.autoStart || m.CookiesConfigured() || m.Status()["browser"] == true {
 				m.probe(ctx)
 			}
@@ -241,11 +335,16 @@ func (m *Manager) Close() {
 func (m *Manager) Status() map[string]any {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.remoteURL != "" && !m.running() {
+		m.authenticated = false
+		m.state = "unavailable"
+	}
 	return map[string]any{"authenticated": m.authenticated, "pending": len(m.queue), "workers": 2, "browser": m.running(), "savedCookies": m.CookiesConfigured(), "state": m.state, "lastVerifiedAt": m.lastVerified, "starts": m.starts}
 }
 func (m *Manager) probe(ctx context.Context) {
-	m.sessionMu.RLock()
-	defer m.sessionMu.RUnlock()
+	// Probes and interactive setup wait for both worker tabs to finish.
+	m.sessionMu.Lock()
+	defer m.sessionMu.Unlock()
 	m.probeSession(ctx)
 }
 func (m *Manager) probeSession(ctx context.Context) {
@@ -263,7 +362,7 @@ func (m *Manager) probeSession(ctx context.Context) {
 	root := m.root
 	m.mu.Unlock()
 	tab, cancel := chromedp.NewContext(root)
-	defer cancel()
+	defer func() { cancel(); m.forgetTarget(tab) }()
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -283,7 +382,7 @@ func (m *Manager) probeSession(ctx context.Context) {
 			locationMu.Unlock()
 		}
 	})
-	e := chromedp.Run(tab, chromedp.Navigate(m.probeURL), chromedp.WaitReady("body"), chromedp.Location(&location))
+	e := chromedp.Run(tab, m.trackTarget(), chromedp.Navigate(m.probeURL), chromedp.WaitReady("body"), chromedp.Location(&location))
 	if location == "" {
 		locationMu.Lock()
 		location = latestLocation
@@ -355,7 +454,7 @@ func (m *Manager) saveSessionCookies(ctx context.Context) error {
 func (m *Manager) RefreshSession(ctx context.Context) map[string]any {
 	m.mu.Lock()
 	life := m.lifetime
-	if m.manualLogin && !m.running() {
+	if m.manualLogin && m.remoteURL == "" && !m.running() {
 		m.authenticated = false
 		m.state = "login_required"
 		m.mu.Unlock()
@@ -363,8 +462,8 @@ func (m *Manager) RefreshSession(ctx context.Context) map[string]any {
 	}
 	m.mu.Unlock()
 	// Browser lifetime is independent of the HTTP request which triggers the probe.
-	m.sessionMu.RLock()
-	defer m.sessionMu.RUnlock()
+	m.sessionMu.Lock()
+	defer m.sessionMu.Unlock()
 	if e := m.start(life); e != nil {
 		m.mu.Lock()
 		m.authenticated = false
@@ -426,6 +525,10 @@ func (m *Manager) PasteCookies(ctx context.Context, raw string) (map[string]any,
 }
 func (m *Manager) Check(ctx context.Context, item string) ([]byte, error) {
 	m.mu.Lock()
+	if m.remoteURL != "" && !m.running() {
+		m.authenticated = false
+		m.state = "unavailable"
+	}
 	authenticated := m.authenticated
 	state := m.state
 	m.mu.Unlock()
@@ -465,17 +568,35 @@ func (m *Manager) Check(ctx context.Context, item string) ([]byte, error) {
 		return r.Body, r.Err
 	}
 }
-func (m *Manager) capture(lifetime, request context.Context, item string) ([]byte, error) {
+func (m *Manager) capture(lifetime, request context.Context, item string) (bodyResult []byte, captureError error) {
 	m.sessionMu.RLock()
 	defer m.sessionMu.RUnlock()
-	if e := m.start(lifetime); e != nil {
-		return nil, e
+	if m.remoteURL != "" {
+		m.mu.Lock()
+		ready := m.running() && m.authenticated
+		m.mu.Unlock()
+		if !ready {
+			return nil, errors.New("BROWSER_UNAVAILABLE")
+		}
+		defer func() {
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			if captureError != nil && !m.running() {
+				m.authenticated = false
+				m.state = "unavailable"
+				captureError = errors.New("BROWSER_UNAVAILABLE")
+			}
+		}()
+	} else {
+		if e := m.start(lifetime); e != nil {
+			return nil, e
+		}
 	}
 	m.mu.Lock()
 	root := m.root
 	m.mu.Unlock()
 	tab, cancel := chromedp.NewContext(root)
-	defer cancel()
+	defer func() { cancel(); m.forgetTarget(tab) }()
 	tab, stop := context.WithTimeout(tab, 20*time.Second)
 	defer stop()
 	go func() {
@@ -528,7 +649,7 @@ func (m *Manager) capture(lifetime, request context.Context, item string) ([]byt
 			}
 		}
 	})
-	if e := chromedp.Run(tab, network.Enable(), chromedp.Navigate(m.offerBaseURL+item)); e != nil {
+	if e := chromedp.Run(tab, m.trackTarget(), network.Enable(), chromedp.Navigate(m.offerBaseURL+item)); e != nil {
 		m.mu.Lock()
 		verification := m.state == "verification_required"
 		m.mu.Unlock()
@@ -580,6 +701,35 @@ func (m *Manager) capture(lifetime, request context.Context, item string) ([]byt
 			}
 			return body, nil
 		}
+	}
+}
+
+func (m *Manager) trackTarget() chromedp.Action {
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		if m.remoteURL != "" {
+			m.mu.Lock()
+			m.ownedTargets[chromedp.FromContext(ctx).Target.TargetID] = true
+			m.mu.Unlock()
+		}
+		return nil
+	})
+}
+
+func (m *Manager) forgetTarget(ctx context.Context) {
+	if m.remoteURL == "" {
+		return
+	}
+	c := chromedp.FromContext(ctx)
+	if c == nil || c.Target == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	select {
+	case <-c.Browser.LostConnection:
+		// Keep the ID so the next connection can close this orphaned tab.
+	default:
+		delete(m.ownedTargets, c.Target.TargetID)
 	}
 }
 

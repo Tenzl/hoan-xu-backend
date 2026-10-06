@@ -101,7 +101,9 @@ func run() error {
 		flags = append(flags, "-count=1")
 	}
 	flags = append(flags, args...)
-	flags = append(flags, "./...")
+	// Private operational scripts are not application packages. They can contain
+	// multiple standalone main programs and must never enter the test/build scan.
+	flags = append(flags, "./cmd/...", "./internal/...")
 	goName := "go"
 	if runtime.GOOS == "windows" {
 		goName += ".exe"

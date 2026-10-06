@@ -1,0 +1,25 @@
+services:
+  chromium:
+    build: .
+    image: hoanxu-chromium:ec2
+    restart: unless-stopped
+    init: false
+    shm_size: 512mb
+    stop_grace_period: 30s
+    # Chrome's namespace sandbox needs user namespaces. No privileged mode,
+    # SYS_ADMIN, or --no-sandbox. Install the AppArmor profile before starting.
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=hoanxu-chromium
+    environment:
+      REMOTE_BROWSER_BRIDGE_PASSWORD: ${REMOTE_BROWSER_BRIDGE_PASSWORD:?Set a private bridge password}
+    volumes:
+      - ${CHROME_PROFILE_DIR:-/var/lib/shopee-chrome}:/var/lib/shopee-chrome
+    ports:
+      - "127.0.0.1:9222:9222"
+      - "127.0.0.1:6080:6080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

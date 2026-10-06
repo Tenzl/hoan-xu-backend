@@ -1,0 +1,2 @@
+# Replace the public key with Render's dedicated public key. Keep the options.
+restrict,port-forwarding,permitopen="127.0.0.1:9222",permitopen="127.0.0.1:6080" ssh-ed25519 REPLACE_WITH_RENDER_PUBLIC_KEY render-chromium

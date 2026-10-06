@@ -321,7 +321,7 @@ func (s *Server) adminRoutes(r chi.Router) {
 			return
 		}
 		if e := s.Affiliate.Browser.OpenInteractive(); e != nil {
-			s.reply(w, r, 0, nil, platform.Fail(503, "BROWSER_UNAVAILABLE", "Chromium chưa sẵn sàng. Kiểm tra CHROME_PATH và màn hình ảo."))
+			s.reply(w, r, 0, nil, platform.Fail(503, "BROWSER_UNAVAILABLE", "Chromium chưa sẵn sàng. Kiểm tra kết nối browser và màn hình điều khiển."))
 			return
 		}
 		// Record who opened the display; never log the access ticket or cookies.

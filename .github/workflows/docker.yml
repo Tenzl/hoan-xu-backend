@@ -1,10 +1,10 @@
-name: Docker browser checks
+name: Remote browser deployment checks
 on: [push, pull_request]
 permissions:
   contents: read
 jobs:
   docker:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -12,11 +12,14 @@ jobs:
           go-version-file: go.mod
       - name: Test browser access and socket revocation
         run: go run ./tests/run.go -race -run 'Test(AccessRequires|OneTimeTicket|ExpiryAnd|NoPublicDisplay|ProxyStrips|OriginConfiguration|UpgradedWebSocket)'
-      - name: Build Docker image
-        run: docker build -t hoanxu-browser:check .
-      - name: Check runtime tools and secret exclusion
+      - name: Build Go API image
+        run: docker build -t hoanxu-backend:check .
+      - name: Check API runtime tools and secret exclusion
         run: |
-          docker run --rm --entrypoint /bin/bash hoanxu-browser:check -c 'test ! -f /app/.env && test ! -f /app/env.prod && test -f /usr/share/novnc/core/rfb.js && command -v Xvfb && command -v x11vnc && command -v websockify && command -v chromium && bash -n /app/deploy/entrypoint.sh'
-      - name: Smoke test headed Chrome and authenticated noVNC
+          docker run --rm --entrypoint /bin/bash hoanxu-backend:check -c 'test ! -f /app/.env && test ! -f /app/env.prod && ! command -v chromium && ! command -v Xvfb && command -v ssh && bash -n /app/deploy/entrypoint.sh'
+      - name: Load Chromium AppArmor profile
+        run: |
+          sudo apparmor_parser -r chromium/apparmor/hoanxu-chromium
+      - name: Smoke test independent Chromium, SSH tunnel and noVNC
         shell: pwsh
-        run: ./tests/deployment/docker-smoke.ps1 -Image hoanxu-browser:check
+        run: ./tests/deployment/docker-smoke.ps1 -Image hoanxu-backend:check -AppArmorProfile hoanxu-chromium

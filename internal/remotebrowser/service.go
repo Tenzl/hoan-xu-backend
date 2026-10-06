@@ -46,6 +46,7 @@ type Service struct {
 	ticketTTL, sessionTTL time.Duration
 	checkInterval         time.Duration
 	bridgePassword        string
+	upstream              string
 }
 
 type Option func(*Service)
@@ -54,15 +55,23 @@ func WithBridgePassword(password string) Option {
 	return func(s *Service) { s.bridgePassword = password }
 }
 
+// The upstream is a server-configured loopback tunnel, never request input.
+func WithUpstream(upstream string) Option {
+	return func(s *Service) { s.upstream = upstream }
+}
+
 func New(sessions Sessions, origin string, options ...Option) (*Service, error) {
 	u, err := url.Parse(origin)
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" || (u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1"))) {
 		return nil, errors.New("REMOTE_BROWSER_ORIGIN must be an HTTPS origin (HTTP is allowed only on localhost)")
 	}
-	upstream, _ := url.Parse("http://127.0.0.1:6080")
-	s := &Service{sessions: sessions, origin: origin, secure: u.Scheme == "https", tickets: make(map[[32]byte]grant), grants: make(map[[32]byte]grant), now: time.Now, ticketTTL: time.Minute, sessionTTL: 10 * time.Minute, checkInterval: 15 * time.Second}
+	s := &Service{sessions: sessions, origin: origin, upstream: "http://127.0.0.1:6080", secure: u.Scheme == "https", tickets: make(map[[32]byte]grant), grants: make(map[[32]byte]grant), now: time.Now, ticketTTL: time.Minute, sessionTTL: 10 * time.Minute, checkInterval: 15 * time.Second}
 	for _, option := range options {
 		option(s)
+	}
+	upstream, err := url.Parse(s.upstream)
+	if err != nil || upstream.Scheme != "http" || upstream.Hostname() != "127.0.0.1" || upstream.Port() == "" || upstream.User != nil || (upstream.Path != "" && upstream.Path != "/") || upstream.RawQuery != "" || upstream.Fragment != "" {
+		return nil, errors.New("REMOTE_BROWSER_UPSTREAM must be an HTTP loopback origin with a port")
 	}
 	s.proxy = &httputil.ReverseProxy{Rewrite: func(p *httputil.ProxyRequest) {
 		p.SetURL(upstream)
@@ -76,6 +85,7 @@ func New(sessions Sessions, origin string, options ...Option) (*Service, error) 
 	}, ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 		http.Error(w, "Màn hình Chrome chưa sẵn sàng. Thử lại sau.", http.StatusBadGateway)
 	}}
+	s.proxy.Transport = &http.Transport{Proxy: nil, ResponseHeaderTimeout: 10 * time.Second}
 	return s, nil
 }
 

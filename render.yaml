@@ -3,13 +3,12 @@ services:
     name: hoan-xu-backend
     runtime: docker
     region: singapore
-    plan: 1c-2g
+    plan: starter
     numInstances: 1
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /readyz
-    # This optional disk preserves the Chrome profile and private uploads.
-    # Without it, sign in again after restart; uploaded files are ephemeral.
+    # Private uploads still require this disk. Chrome's profile lives on EC2.
     disk:
       name: hoan-xu-private-data
       mountPath: /var/data
@@ -27,6 +26,26 @@ services:
         value: "true"
       - key: REMOTE_BROWSER_ENABLED
         value: "true"
+      - key: BROWSER_MODE
+        value: remote
+      - key: CHROME_REMOTE_URL
+        value: http://127.0.0.1:9222
+      - key: REMOTE_BROWSER_UPSTREAM
+        value: http://127.0.0.1:6080
+      - key: CHROME_SSH_TUNNEL_ENABLED
+        value: "true"
+      - key: CHROME_SSH_HOST
+        sync: false
+      - key: CHROME_SSH_USER
+        value: chrome-tunnel
+      - key: CHROME_SSH_PORT
+        value: "22"
+      - key: CHROME_SSH_PRIVATE_KEY
+        sync: false
+      - key: CHROME_SSH_KNOWN_HOSTS
+        sync: false
+      - key: REMOTE_BROWSER_BRIDGE_PASSWORD
+        sync: false
       - key: REMOTE_BROWSER_ORIGIN
         value: https://hoan-xu-backend.onrender.com
       - key: GOOGLE_CLIENT_ID

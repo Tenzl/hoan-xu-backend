@@ -209,6 +209,37 @@ func TestOriginConfiguration(t *testing.T) {
 	}
 }
 
+func TestUpstreamConfigurationAndProxy(t *testing.T) {
+	for _, upstream := range []string{"", "http://ec2.example:6080", "https://127.0.0.1:6080", "http://127.0.0.1:6080/path", "http://user:secret@127.0.0.1:6080", "http://127.0.0.1:6080?secret=x"} {
+		if _, err := New(&fakeSessions{}, "https://backend.example", WithUpstream(upstream)); err == nil {
+			t.Fatal("unsafe upstream accepted", upstream)
+		}
+	}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u, p, ok := r.BasicAuth()
+		if !ok || u != "hoanxu" || p != "fixture-bridge" || r.Header.Get("Cookie") != "" || r.Header.Get("Origin") != "" {
+			t.Error("proxy credential handling")
+		}
+		if r.URL.Path != "/core/rfb.js" {
+			t.Error("wrong proxy path", r.URL.Path)
+		}
+		fmt.Fprint(w, "remote-fixture")
+	}))
+	defer upstream.Close()
+	s, err := New(&fakeSessions{u: &auth.User{Role: "admin", Recent: true}}, "https://backend.example", WithUpstream(upstream.URL), WithBridgePassword("fixture-bridge"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := exchange(t, s, issueTicket(t, s), s.origin).Result().Cookies()[0]
+	r := httptest.NewRequest("GET", "/browser/view/core/rfb.js", nil)
+	r.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	if w.Code != 200 || w.Body.String() != "remote-fixture" {
+		t.Fatal(w.Code, w.Body.String())
+	}
+}
+
 func TestUpgradedWebSocketClosesOnExpiryAndLogout(t *testing.T) {
 	for _, revoke := range []bool{false, true} {
 		t.Run(fmt.Sprint("revoke=", revoke), func(t *testing.T) {

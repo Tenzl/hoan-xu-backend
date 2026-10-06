@@ -1,126 +1,118 @@
-# Backend và Chrome trên Render
+# Go trên Render, Chromium trên EC2
 
-Một Render **Web Service**, runtime **Docker**, chạy API Go, Chromium có giao diện
-(`CHROME_HEADLESS=false`), Xvfb, Openbox và noVNC/websockify. Frontend tiếp tục ở
-Vercel; PostgreSQL tiếp tục dùng Supabase. Không cần worker hoặc laptop chạy nền.
+Render chạy Go API, resolver, cache, singleflight, queue và chromedp. Chromium,
+Xvfb, Openbox, noVNC và profile nằm riêng trên EC2. Source triển khai độc lập
+nằm trong folder `chromium/` ở gốc repo backend. PostgreSQL giữ nguyên; không
+cần migration cho thay đổi này.
 
-## Cấu hình Web Service đang có
+## Chuẩn bị EC2 trước
 
-1. Dùng repository `Tenzl/hoan-xu-backend`, branch `main`, root directory để trống.
-   Vào **Settings → Build → Source → Edit**, giữ repo/branch và chuyển runtime
-   sang **Docker**; Dockerfile path `./Dockerfile`,
-   Docker build context `.`. Bỏ lệnh build/start Go cũ và để Docker dùng entrypoint.
-2. Dùng một instance. Cấu hình mẫu `render.yaml` dùng **1 CPU / 2 GB RAM**
-   (`1c-2g`) cho Go và Chrome; đây là cấu hình trả phí, cần xem giá trên Render
-   trước khi áp dụng. RAM 512 MB có thể không đủ cho Chrome và API chạy cùng nhau.
-3. Nếu muốn giữ phiên Chrome và file upload qua restart, thêm disk 5 GB,
-   mount `/var/data`. Disk là tùy chọn trả phí và chỉ gắn vào một instance.
-   Cấu hình mẫu `render.yaml` giữ disk; có thể bỏ khối `disk` trước khi tạo
-   service mới nếu chấp nhận đăng nhập lại và mất file upload sau restart.
-4. Import các giá trị trong `env.prod` vào Render Environment. File này được git
-   ignore và không nằm trong Docker image. Giữ nguyên `DATA_ENCRYPTION_KEY` qua
-   các lần deploy. Không tạo lại khóa khi đã có dữ liệu mã hóa.
-5. Health check `/readyz`. Public port dùng biến `PORT` của Render (mặc định 10000).
-   Chỉ API bind `0.0.0.0`; không mở các port 5900, 6080 hoặc Chrome debugging.
-6. Chạy `/app/admin migrate` bằng kết nối migration có đủ quyền trước khi đưa
-   API mới vào sử dụng. Giữ migration 10 trong lịch sử; API không còn dùng
-   bảng `browser_credentials` để nạp hoặc lưu phiên Shopee.
-   Có thể chạy `go run ./cmd/admin migrate` tại máy có cấu hình database đó.
-   Không chạy migration tự động mỗi lần container khởi động.
+Làm theo [README Chromium](../chromium/README.md): Docker Compose, EBS profile,
+sandbox, user SSH giới hạn forwarding và pin host key. Deploy riêng folder
+`chromium/` trong repo backend. Folder này không phụ thuộc Go/database và có
+Docker build context riêng; `.dockerignore` của backend loại nó khỏi build API.
+Folder `chromium/` bên cạnh repo trong workspace hiện tại là bản triển khai
+local, chứa secrets riêng và không được push.
 
-Các biến dành cho container:
+Giữ hai worker và một backend instance. Chromium chạy 24/7, có một tab dashboard
+để đăng nhập; các tab Go tạo dùng cùng default context/profile. Go không launch
+hoặc kill Chrome trên EC2. Không tự động import/export cookie.
+
+## Cấu hình Render
+
+Giữ Docker runtime, `Dockerfile` và context `.` tại root repo backend. Image mới
+chỉ có Go API/admin, CA certificates, SSH client và process supervisor; không còn
+Chromium, Xvfb hay VNC. Health check tiếp tục `/readyz` cho API/database.
+
+`render.yaml` dùng một instance `starter` làm điểm bắt đầu cho Go; kiểm tra RAM
+thực tế trước khi giảm plan hiện tại. Giữ disk `/var/data` cho **file upload**;
+profile Chrome đã chuyển sang EBS không có nghĩa file upload cũng được chuyển.
+Giữ nguyên `DATABASE_URL`, `DATA_ENCRYPTION_KEY`, OAuth và `APP_ORIGIN` hiện có.
+Không tái tạo encryption key. Migration vẫn chạy riêng bằng `/app/admin migrate`.
 
 | Biến | Giá trị |
 | --- | --- |
-| `CHROME_PATH` | `/app/deploy/chromium.sh` |
-| `CHROME_HEADLESS` | `false` |
-| `DISPLAY` | `:99` |
-| `CHROME_PROFILE` | `/var/data/chrome-profile` |
-| `PRIVATE_DIR` | `/var/data/files` |
+| `BROWSER_MODE` | `remote` |
+| `CHROME_REMOTE_URL` | `http://127.0.0.1:9222` |
 | `REMOTE_BROWSER_ENABLED` | `true` |
-| `REMOTE_BROWSER_ORIGIN` | `https://hoan-xu-backend.onrender.com` |
-| `APP_ORIGIN` | `https://hoan-xu.vercel.app` |
+| `REMOTE_BROWSER_UPSTREAM` | `http://127.0.0.1:6080` |
+| `REMOTE_BROWSER_ORIGIN` | Origin HTTPS backend Render, không có slash cuối |
+| `REMOTE_BROWSER_BRIDGE_PASSWORD` | Secret giống EC2, 32+ ký tự URL-safe |
+| `CHROME_SSH_TUNNEL_ENABLED` | `true` |
+| `CHROME_SSH_HOST` | Elastic IP/hostname EC2 |
+| `CHROME_SSH_USER` | `chrome-tunnel` |
+| `CHROME_SSH_PORT` | `22` |
+| `CHROME_SSH_PRIVATE_KEY` | Nội dung private key nhiều dòng, không có passphrase |
+| `CHROME_SSH_KNOWN_HOSTS` | Nội dung known_hosts đã xác minh fingerprint |
+| `PRIVATE_DIR` | `/var/data/files` |
 | `COOKIE_SECURE` | `true` |
 
-`REMOTE_BROWSER_ORIGIN` phải trùng origin URL backend thật, không có dấu `/` cuối.
-Frontend dùng `BACKEND_URL` cùng backend đó và cần build lại trên Vercel nếu đổi
-giá trị. WebSocket màn hình mở trực tiếp tại backend, không đi qua rewrite Vercel.
-Nếu dùng custom domain backend, đổi `REMOTE_BROWSER_ORIGIN` theo domain mới.
+Bỏ các biến Chrome local cũ (`CHROME_PATH`, `CHROME_PROFILE`, `DISPLAY`,
+`CHROME_HEADLESS`) khỏi Render Environment để tránh nhầm lẫn. Không import nguyên
+file `env.prod` cũ dành cho container gộp Chrome/Go. Không sửa secrets đã có trong
+file local chỉ để thử kết nối. Frontend giữ `BACKEND_URL` nếu origin Go không đổi.
 
-## Đăng nhập và xác minh Shopee
+Entrypoint ghi SSH key vào thư mục tạm mode 700, file mode 600; không ghi key
+vào disk upload và không chuyển biến chứa key cho process API. SSH dùng
+`StrictHostKeyChecking=yes`, key riêng, keepalive và hai local forwards chỉ bind
+loopback. Wrong host key bị từ chối, không tự cập nhật. Tunnel retry 2–30 giây;
+API vẫn phục vụ khi tunnel/EC2 tạm mất kết nối.
 
-1. Đăng nhập tài khoản **admin** trên frontend, vào **Đăng nhập Shopee**.
-2. Nhập lại mật khẩu quản trị và chọn **Mở Chrome trên server**.
-3. Trong Chrome từ xa, đăng nhập Shopee Affiliate và hoàn tất xác minh mà
-   Shopee yêu cầu. Đây chính là Chrome API dùng để kiểm tra sản phẩm.
-4. Quay lại quản trị, chọn **Tôi đã đăng nhập — Kiểm tra phiên**.
-5. Nhập **Affiliate ID (Shopee Publisher)** vào ô cấu hình và chọn **Lưu Affiliate ID**.
-   Mã được lưu trong database; các link mới dùng mã đã lưu. Không cần biến
-   `SHOPEE_PUBLISHER` trong Render Environment.
-6. Đóng cửa sổ điều khiển khi xong. Chrome tiếp tục chạy và dùng phiên vừa đăng nhập.
+CDP discovery lấy browser WebSocket ID mới mỗi lần reconnect và chỉ dùng origin
+loopback đã cấu hình. Retry 5–30 giây; phiên phải được probe trước khi checker
+hoạt động lại. Probe chạy độc quyền, chờ worker rảnh. Lỗi browser hiện trong
+trang admin; `/readyz` không restart API chỉ vì Shopee/EC2 không sẵn sàng.
 
-Backend không đọc/ghi cookie Shopee từ database hoặc file; chức năng dán cookie
-đã bị tắt. Chrome chỉ mở khi admin yêu cầu. Sau restart, mở Chrome từ quản trị;
-nếu không có disk, đăng nhập lại. Nếu có disk, Chrome có thể dùng phiên trong
-profile, nhưng Shopee vẫn có thể yêu cầu xác minh lại. Affiliate ID được giữ trong
-database dù không có disk.
+## Đăng nhập và nghiệm thu
 
-`SHOPEE_TRACKING_VERIFIED` chỉ bật sau khi tracking affiliate thật đã được kiểm
-chứng. Lưu Affiliate ID hoặc đăng nhập thành công chưa tự bật tracking.
+1. Admin xác nhận mật khẩu, mở **Đăng nhập Shopee → Mở Chrome trên server**.
+2. Đăng nhập Affiliate, hoàn tất xác minh bằng tay trên tab dashboard EC2.
+3. Chọn **Tôi đã đăng nhập — Kiểm tra phiên**, lưu Affiliate ID và thử sản phẩm.
+4. Restart Render: Chrome EC2 tiếp tục chạy; vé điều khiển cũ hết hiệu lực,
+   admin mở màn hình lại. Restart Chromium: Go tự kết nối lại và probe phiên.
+5. Kiểm tra từ mạng bên ngoài: 9222/6080/5900 không truy cập được; staff/customer
+   không được mở màn hình. Profile tồn tại không bảo đảm Shopee luôn chấp nhận
+   phiên. Tracking phải kiểm chứng riêng trước khi bật `SHOPEE_TRACKING_VERIFIED`.
 
-Container restart làm mất vé và phiên điều khiển. Disk khiến deploy cần dừng
-instance cũ trước khi instance mới chạy; có gián đoạn ngắn và màn hình đang mở
-sẽ bị ngắt.
+Vé điều khiển một lần 60 giây, phiên màn hình 10 phút, HttpOnly/Secure/SameSite
+Strict, kiểm tra Origin và thu hồi theo session admin vẫn giữ nguyên. Proxy
+không gửi Cookie/Authorization của user sang EC2; nó dùng bridge password riêng.
 
-## Bảo vệ màn hình và vận hành
+## Development, kiểm thử và rollback
 
-- Vé một lần hết hạn sau 60 giây, nằm trong fragment URL, không trong access log.
-- Phiên màn hình tối đa 10 phút, dùng cookie HttpOnly/Secure/SameSite Strict.
-- Tài khoản phải là admin và đã xác nhận mật khẩu gần đây. Staff có quyền
-  settings cũng không được điều khiển Chrome. Mỗi lần mở được ghi audit, không
-  ghi cookie, mật khẩu hoặc vé truy cập.
-- Mọi tài nguyên màn hình kiểm tra phiên admin gốc; WebSocket kiểm tra Origin và
-  kiểm tra lại phiên mỗi 15 giây. Đăng xuất/khóa tài khoản thu hồi quyền điều khiển.
-- VNC và websockify chỉ nghe loopback. Proxy không chuyển cookie đăng nhập hoặc
-  Authorization của người dùng sang websockify. Proxy dùng một mật khẩu bridge
-  ngẫu nhiên riêng, tạo lại khi container khởi động, để trang web bên trong Chrome
-  cũng không thể tự kết nối WebSocket loopback. Không có trang VNC công khai.
-- Entry point sửa quyền thư mục disk rồi chạy **toàn bộ tiến trình bằng UID
-  10001**. Wrapper Chromium tắt OS sandbox vì môi trường container không cấp
-  user namespace cần thiết; Chrome vẫn chạy dưới user không có quyền root.
-- Khi một tiến trình chính dừng, container dừng để Render khởi động lại.
+Development giữ `BROWSER_MODE=local`, `CHROME_HEADLESS=false`, `CHROME_PATH` và
+profile trên máy developer; chạy `go run ./cmd/api` như trước. Image production
+mới không có Chrome local. Khi cần rollback deployment gộp, dùng image/backend
+revision cũ và giữ nguyên disk/profile cũ trước khi chuyển đổi.
 
-## Kiểm tra trước khi deploy
+Thử remote từ máy developer bằng tunnel tự quản lý:
 
-```powershell
-docker build -t hoanxu-backend:browser .
-docker run --rm --name hoanxu-browser --env-file env.prod -p 10000:10000 -v hoanxu-private:/var/data hoanxu-backend:browser
+```bash
+ssh -N -T -i render-chromium -o StrictHostKeyChecking=yes \
+  -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 \
+  -L 127.0.0.1:9222:127.0.0.1:9222 \
+  -L 127.0.0.1:6080:127.0.0.1:6080 chrome-tunnel@EC2_ELASTIC_IP
 ```
 
-Để mở màn hình khi thử Docker trên máy mình, override
-`REMOTE_BROWSER_ORIGIN=http://localhost:10000`. Nếu dùng frontend local, override
-`APP_ORIGIN=http://localhost:3000` và `COOKIE_SECURE=false`, rồi trỏ proxy frontend
-về `http://localhost:10000`. Không đổi các giá trị này trên production.
-
-Đường dẫn `/browser/screen` và `/browser/view/websockify` chưa xác thực phải trả
-401. `/readyz` trả 200; Chrome xuất hiện khi admin mở màn hình. Sau restart,
-đăng nhập admin và mở lại màn hình để kiểm tra profile Shopee đã giữ trên disk.
-
-Test tự động với database/container riêng, không dùng Supabase:
+Đặt `BROWSER_MODE=remote` trong env development; `go run` không tự launch SSH.
+Muốn mở màn hình thì bật `REMOTE_BROWSER_ENABLED`, đặt origin backend localhost
+và bridge secret. `CHROME_SSH_TUNNEL_ENABLED=false` chỉ dùng với Docker test hoặc
+tunnel được quản lý bên ngoài; không trỏ CDP ra địa chỉ public.
 
 ```powershell
-./tests/deployment/docker-smoke.ps1
-# Thêm kiểm tra canvas noVNC trên desktop/mobile bằng Playwright của frontend:
-./tests/deployment/docker-smoke.ps1 -ViewerTest ../frontend/tests/deployment/remote-viewer.mjs
+$env:BROWSER_TEST_PATH='C:/Program Files/Google/Chrome/Application/chrome.exe'
+go run ./tests/run.go
+go run ./tests/run.go vet
+go build ./cmd/api ./cmd/admin
 ```
 
-Test kiểm tra profile còn trên volume sau restart và mở lại được Chrome. Không
-thực hiện đăng nhập Shopee thật; việc sàn chấp nhận phiên/IP phải kiểm tra sau
-deploy trên Render.
+Test lifecycle dùng server giả lập, hai worker, CDP qua proxy loopback và browser
+restart; không đăng nhập Shopee hoặc truy cập database production.
+Docker smoke test tại `tests/deployment/docker-smoke.ps1` dựng PostgreSQL,
+Chromium và SSH fixture riêng, kiểm tra tunnel thật và viewer. Chạy trên Docker
+daemon sẵn sàng; AppArmor production cần kiểm chứng trên Ubuntu EC2 riêng.
 
-Nguồn: [Docker trên Render](https://render.com/docs/docker),
-[Web Service](https://render.com/docs/web-services),
-[Persistent disk](https://render.com/docs/disks),
-[WebSocket](https://render.com/docs/websocket),
-[Blueprint](https://render.com/docs/blueprint-spec),
-[noVNC](https://novnc.com/info.html).
+Nguồn: [chromedp](https://github.com/chromedp/chromedp),
+[Render outbound IPs](https://render.com/docs/outbound-ip-addresses),
+[Render disk](https://render.com/docs/disks),
+[OpenSSH](https://man.openbsd.org/ssh_config).

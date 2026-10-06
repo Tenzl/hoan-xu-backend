@@ -52,13 +52,27 @@ func run() error {
 	if e != nil {
 		slog.Warn("google_unavailable", "error", e)
 	}
-	profile, e := filepath.Abs(env("CHROME_PROFILE", "private-data/chrome-profile"))
-	if e != nil {
-		return e
-	}
 	enabled := os.Getenv("SHOPEE_ENABLED") == "true"
-	b := browser.NewManual(os.Getenv("CHROME_PATH"), profile, browser.WithHeadless(env("CHROME_HEADLESS", "false") != "false"))
-	go b.Run(ctx)
+	mode := env("BROWSER_MODE", "local")
+	var b *browser.Manager
+	switch mode {
+	case "remote":
+		b, e = browser.NewRemote(env("CHROME_REMOTE_URL", "http://127.0.0.1:9222"))
+		if e != nil {
+			return e
+		}
+	case "local":
+		profile, err := filepath.Abs(env("CHROME_PROFILE", "private-data/chrome-profile"))
+		if err != nil {
+			return err
+		}
+		b = browser.NewManual(os.Getenv("CHROME_PATH"), profile, browser.WithHeadless(env("CHROME_HEADLESS", "false") != "false"))
+	default:
+		return fmt.Errorf("BROWSER_MODE must be local or remote")
+	}
+	browserDone := make(chan struct{})
+	go func() { b.Run(ctx); close(browserDone) }()
+	defer func() { stop(); <-browserDone }()
 	scale, _ := strconv.ParseInt(os.Getenv("SHOPEE_PRICE_SCALE"), 10, 64)
 	aff := &affiliate.Service{Store: store, Browser: b, Enabled: enabled, TrackingVerified: os.Getenv("SHOPEE_TRACKING_VERIFIED") == "true", SchemaVerified: os.Getenv("SHOPEE_SCHEMA_VERIFIED") == "true", PriceScale: scale}
 	private, e := filepath.Abs(env("PRIVATE_DIR", "private-data/files"))
@@ -67,14 +81,14 @@ func run() error {
 	}
 	server := &api.Server{Store: store, Auth: a, Affiliate: aff, Origin: env("APP_ORIGIN", "http://localhost:3000"), Secure: os.Getenv("COOKIE_SECURE") == "true", PrivateDir: private}
 	if os.Getenv("REMOTE_BROWSER_ENABLED") == "true" {
-		if env("CHROME_HEADLESS", "true") != "false" || os.Getenv("DISPLAY") == "" {
+		if mode == "local" && (env("CHROME_HEADLESS", "true") != "false" || os.Getenv("DISPLAY") == "") {
 			return fmt.Errorf("remote browser requires CHROME_HEADLESS=false and DISPLAY")
 		}
 		bridgePassword := os.Getenv("REMOTE_BROWSER_BRIDGE_PASSWORD")
 		if bridgePassword == "" {
-			return fmt.Errorf("remote browser bridge credentials missing; start with the Docker entrypoint")
+			return fmt.Errorf("REMOTE_BROWSER_BRIDGE_PASSWORD is required")
 		}
-		server.RemoteBrowser, e = remotebrowser.New(a, os.Getenv("REMOTE_BROWSER_ORIGIN"), remotebrowser.WithBridgePassword(bridgePassword))
+		server.RemoteBrowser, e = remotebrowser.New(a, os.Getenv("REMOTE_BROWSER_ORIGIN"), remotebrowser.WithBridgePassword(bridgePassword), remotebrowser.WithUpstream(env("REMOTE_BROWSER_UPSTREAM", "http://127.0.0.1:6080")))
 		if e != nil {
 			return e
 		}
@@ -82,7 +96,7 @@ func run() error {
 	go (&imports.Service{Store: store}).Run(ctx)
 	go maintenance(ctx, store)
 	// A native Chrome window is available only on a loopback development server.
-	server.LocalBrowser = server.RemoteBrowser == nil && env("HOST", "127.0.0.1") == "127.0.0.1"
+	server.LocalBrowser = mode == "local" && server.RemoteBrowser == nil && env("HOST", "127.0.0.1") == "127.0.0.1"
 	srv := &http.Server{Addr: env("HOST", "127.0.0.1") + ":" + env("PORT", "8080"), Handler: api.New(server), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		<-ctx.Done()
