@@ -30,6 +30,7 @@ type Service struct {
 	LinkGenerator OfferLinkGenerator // Defaults to Browser.
 
 	Enabled, TrackingVerified bool
+	ManagedConfig             bool
 	Publisher                 string
 	SchemaVerified            bool
 	PriceScale                int64
@@ -39,8 +40,12 @@ type Service struct {
 }
 
 func (s *Service) CheckEnabled() bool {
+	if s.ManagedConfig {
+		return s.Enabled
+	}
 	return s.Enabled || (s.Browser != nil && (s.Browser.UsesManualLogin() || s.Browser.CookiesConfigured()))
 }
+func (s *Service) ClearCache() { s.mu.Lock(); defer s.mu.Unlock(); s.cache = nil }
 func (s *Service) Check(ctx context.Context, raw string) (value any, checkErr error) {
 	started := time.Now()
 	var resolveTime, checkWait time.Duration
@@ -54,7 +59,7 @@ func (s *Service) Check(ctx context.Context, raw string) (value any, checkErr er
 	resolveCancel()
 	resolveTime = time.Since(started)
 	if e != nil {
-		return nil, platform.Fail(422, "INVALID_URL", e.Error())
+		return nil, resolveError(e)
 	}
 	if !s.CheckEnabled() || s.Browser == nil {
 		return nil, platform.Fail(503, "SHOPEE_NOT_CONFIGURED", "Shopee đang ở trạng thái chưa sẵn sàng; mẫu được giữ tại /demo.")
@@ -66,7 +71,8 @@ func (s *Service) Check(ctx context.Context, raw string) (value any, checkErr er
 			return nil, e
 		}
 	}
-	key := publisher + ":" + shop + ":" + item + ":v2:" + strconv.FormatUint(s.Browser.SessionVersion(), 10)
+	schemaVerified, priceScale, manager := s.SchemaVerified, s.PriceScale, s.Browser
+	key := publisher + ":" + shop + ":" + item + ":v3:" + strconv.FormatInt(priceScale, 10) + ":" + strconv.FormatBool(schemaVerified) + ":" + strconv.FormatUint(manager.SessionVersion(), 10)
 	s.mu.Lock()
 	entry, ok := s.cache[key]
 	s.mu.Unlock()
@@ -81,7 +87,7 @@ func (s *Service) Check(ctx context.Context, raw string) (value any, checkErr er
 		}
 		c, cancel := context.WithDeadline(context.Background(), deadline)
 		defer cancel()
-		b, e := s.Browser.Check(c, item)
+		b, e := manager.Check(c, item)
 		if e != nil {
 			return nil, checkError(e)
 		}
@@ -97,10 +103,10 @@ func (s *Service) Check(ctx context.Context, raw string) (value any, checkErr er
 			return nil, platform.Fail(502, "SHOPEE_RESPONSE_INVALID", "Schema Shopee chưa được xác minh.")
 		}
 		result := map[string]any{"shopId": shop, "itemId": item, "productLink": canonical, "checkedAt": time.Now(), "estimated": true, "schemaVerified": false}
-		if s.SchemaVerified {
-			product, err := Normalize(data, s.PriceScale)
+		if schemaVerified {
+			product, err := Normalize(data, priceScale)
 			if err != nil {
-				s.Browser.RecordFailure("SHOPEE_RESPONSE_INVALID", "normalize")
+				manager.RecordFailure("SHOPEE_RESPONSE_INVALID", "normalize")
 				return nil, platform.Fail(502, "SHOPEE_RESPONSE_INVALID", "Schema Shopee khác dữ liệu đã xác minh.")
 			}
 			b, _ := json.Marshal(product)
@@ -112,7 +118,7 @@ func (s *Service) Check(ctx context.Context, raw string) (value any, checkErr er
 			result["schemaVerified"] = true
 		}
 		serialized, _ := json.Marshal(result)
-		if !s.SchemaVerified {
+		if !schemaVerified {
 			return json.RawMessage(serialized), nil
 		}
 		s.mu.Lock()
@@ -145,9 +151,9 @@ func (s *Service) Check(ctx context.Context, raw string) (value any, checkErr er
 	}
 }
 func (s *Service) CreateLink(ctx context.Context, user, raw string) (any, error) {
-	shop, item, _, e := Resolve(ctx, raw)
+	shop, item, canonical, e := Resolve(ctx, raw)
 	if e != nil {
-		return nil, platform.Fail(422, "INVALID_URL", e.Error())
+		return nil, resolveError(e)
 	}
 	if !s.CheckEnabled() || !s.TrackingVerified {
 		return nil, platform.Fail(503, "TRACKING_NOT_VERIFIED", "Chưa xác minh tracking Shopee; chưa tạo link hoàn tiền thật.")
@@ -163,7 +169,7 @@ func (s *Service) CreateLink(ctx context.Context, user, raw string) (any, error)
 	if e != nil {
 		return nil, e
 	}
-	if status != "available" {
+	if !s.ManagedConfig && status != "available" {
 		return nil, platform.Fail(503, "CHANNEL_UNAVAILABLE", "Kênh Shopee chưa được bật.")
 	}
 	var conf struct {
@@ -231,7 +237,7 @@ func (s *Service) CreateLink(ctx context.Context, user, raw string) (any, error)
 		return nil, e
 	}
 	var id string
-	e = s.Store.Pool.QueryRow(ctx, `INSERT INTO affiliate_links(user_id,channel,original_url,affiliate_url,tracking_code,policy_id,item_id,created_at,tier_code,min_share_bps,max_share_bps,tracking_sub_ids,expires_at,payout_factor,effective_share_bps,lifecycle_status) VALUES($1,'shopee',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'active') RETURNING id::text`, user, raw, shortURL, ids[2], m.PolicyID, item, created, m.Code, int(m.Public().Min), int(m.Public().Max), subIDs, claims.ExpiresAt(), rate.Factor(), rate.EffectiveBps).Scan(&id)
+	e = s.Store.Pool.QueryRow(ctx, `INSERT INTO affiliate_links(user_id,channel,original_url,affiliate_url,tracking_code,policy_id,item_id,created_at,tier_code,min_share_bps,max_share_bps,tracking_sub_ids,expires_at,payout_factor,effective_share_bps,lifecycle_status) VALUES($1,'shopee',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'active') RETURNING id::text`, user, canonical, shortURL, ids[2], m.PolicyID, item, created, m.Code, int(m.Public().Min), int(m.Public().Max), subIDs, claims.ExpiresAt(), rate.Factor(), rate.EffectiveBps).Scan(&id)
 	if e != nil {
 		return nil, e
 	}

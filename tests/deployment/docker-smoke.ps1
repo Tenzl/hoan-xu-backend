@@ -59,7 +59,7 @@ try {
   [void](Invoke-SmokeDocker run --rm --network $taskNetwork @taskEnv --entrypoint /app/admin $Image migrate)
   [void](Invoke-SmokeDocker run --rm --network $taskNetwork @taskEnv -e "ADMIN_PASSWORD=$taskPassword" --entrypoint /app/admin $Image create --username smokeadmin --name SmokeAdmin --role admin)
   [void](Invoke-SmokeDocker exec $taskDB psql -U hoanxu -d hoanxu_browser_test -c 'UPDATE internal_credentials SET must_change=false;')
-  [void](Invoke-SmokeDocker run -d --name $taskAPI --cap-drop KILL --network $taskNetwork @taskEnv -e BROWSER_MODE=remote -e CHROME_SSH_TUNNEL_ENABLED=true -e "CHROME_SSH_HOST=$taskChrome" -e CHROME_SSH_PORT=2222 -e "CHROME_SSH_PRIVATE_KEY=$taskPrivateKey" -e "CHROME_SSH_KNOWN_HOSTS=$taskKnownHosts" -e "REMOTE_BROWSER_BRIDGE_PASSWORD=$taskBridge" -e "REMOTE_BROWSER_ORIGIN=$taskOrigin" -e APP_ORIGIN=http://localhost:3000 -e COOKIE_SECURE=false -p "127.0.0.1:${Port}:10000" -v "${taskVolume}:/var/data" $Image)
+  [void](Invoke-SmokeDocker run -d --name $taskAPI --cap-drop KILL --network $taskNetwork @taskEnv -e CHROME_SSH_TUNNEL_ENABLED=true -e "CHROME_SSH_HOST=$taskChrome" -e CHROME_SSH_PORT=2222 -e "CHROME_SSH_PRIVATE_KEY=$taskPrivateKey" -e "CHROME_SSH_KNOWN_HOSTS=$taskKnownHosts" -e "REMOTE_BROWSER_BRIDGE_PASSWORD=$taskBridge" -e "REMOTE_BROWSER_ORIGIN=$taskOrigin" -e APP_ORIGIN=http://localhost:3000 -e COOKIE_SECURE=false -p "127.0.0.1:${Port}:10000" -v "${taskVolume}:/var/data" $Image)
   $taskPrivateKey = $null
   $taskSession = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
   for ($attempt = 0; $attempt -lt 60; $attempt++) {
@@ -82,13 +82,16 @@ try {
   $me = Invoke-RestMethod "$taskOrigin/api/v1/me" -WebSession $taskSession
   $headers['X-CSRF-Token'] = $me.data.csrfToken
   [void](Invoke-WebRequest "$taskOrigin/api/v1/auth/internal/reauth" -Method Post -Headers $headers -ContentType application/json -Body (@{password=$taskPassword}|ConvertTo-Json) -WebSession $taskSession)
+  $taskSettings = (Invoke-RestMethod "$taskOrigin/api/v1/admin/browser/settings" -WebSession $taskSession).data
+  $taskSettingsInput = @{ version=$taskSettings.version; publisher=$taskSettings.publisher; enabled=$false; mode='remote'; priceScale=100000; headless=$false; remoteUrl='http://127.0.0.1:9222'; executablePath=''; profilePath=$taskSettings.profilePath }
+  [void](Invoke-RestMethod "$taskOrigin/api/v1/admin/browser/settings" -Method Put -Headers $headers -ContentType application/json -Body ($taskSettingsInput|ConvertTo-Json) -WebSession $taskSession)
+  $access = Invoke-RestMethod "$taskOrigin/api/v1/admin/browser/access" -Method Post -Headers $headers -WebSession $taskSession -TimeoutSec 45
   for ($attempt = 0; $attempt -lt 60; $attempt++) {
     $taskBrowserStatus = Invoke-RestMethod "$taskOrigin/api/v1/admin/browser" -WebSession $taskSession
-    if ($taskBrowserStatus.data.browser) { break }
+    if ($taskBrowserStatus.data.browser.browser) { break }
     Start-Sleep -Seconds 1
   }
-  Assert-Smoke $taskBrowserStatus.data.browser 'Go did not attach to the independent browser.'
-  $access = Invoke-RestMethod "$taskOrigin/api/v1/admin/browser/access" -Method Post -Headers $headers -WebSession $taskSession -TimeoutSec 45
+  Assert-Smoke $taskBrowserStatus.data.browser.browser 'Go did not attach to the independent browser.'
   $ticket = ([uri]$access.data.url).Fragment.Substring('#ticket='.Length)
   $remoteHeaders = @{ Origin = $taskOrigin }
   $response = Invoke-WebRequest "$taskOrigin/browser/session" -Method Post -Headers $remoteHeaders -ContentType application/json -Body (@{ticket=$ticket}|ConvertTo-Json) -WebSession $taskSession

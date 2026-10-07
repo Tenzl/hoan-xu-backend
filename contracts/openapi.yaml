@@ -2461,7 +2461,9 @@
                     "meta"
                   ],
                   "properties": {
-                    "data": {},
+                    "data": {
+                      "$ref": "#/components/schemas/ProductCheck"
+                    },
                     "meta": {
                       "type": "object",
                       "properties": {
@@ -2516,7 +2518,7 @@
             }
           },
           "422": {
-            "description": "Validation failure",
+            "description": "INVALID_URL or NOT_PRODUCT_LINK. Shop links cannot generate a product cashback link.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2535,6 +2537,16 @@
               }
             }
           },
+          "502": {
+            "description": "URL_RESOLVE_FAILED or Shopee product/link request failure. No incoming URL or token is exposed in the message.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "503": {
             "description": "BROWSER_UNAVAILABLE, SHOPEE_LOGIN_REQUIRED, SHOPEE_VERIFICATION_REQUIRED or queue/configuration unavailable.",
             "content": {
@@ -2545,18 +2557,8 @@
               }
             }
           },
-          "502": {
-            "description": "SHOPEE_RESPONSE_NOT_OBSERVED, SHOPEE_UPSTREAM_FAILED or SHOPEE_RESPONSE_INVALID.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
           "504": {
-            "description": "SHOPEE_TIMEOUT: product request was observed but did not finish within the deadline.",
+            "description": "SHOPEE_TIMEOUT during URL resolution or the Shopee request. Explicit retry is allowed.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2703,8 +2705,8 @@
               }
             }
           },
-          "503": {
-            "description": "BROWSER_UNAVAILABLE, SHOPEE_LOGIN_REQUIRED, SHOPEE_VERIFICATION_REQUIRED or queue/configuration unavailable.",
+          "502": {
+            "description": "SHOPEE_RESPONSE_NOT_OBSERVED, SHOPEE_UPSTREAM_FAILED or SHOPEE_RESPONSE_INVALID.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2713,8 +2715,8 @@
               }
             }
           },
-          "502": {
-            "description": "SHOPEE_RESPONSE_NOT_OBSERVED, SHOPEE_UPSTREAM_FAILED or SHOPEE_RESPONSE_INVALID.",
+          "503": {
+            "description": "BROWSER_UNAVAILABLE, SHOPEE_LOGIN_REQUIRED, SHOPEE_VERIFICATION_REQUIRED or queue/configuration unavailable.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2939,6 +2941,29 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "Created and saved short link with signed 7-day tracking; no order is created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AffiliateLinkCreated"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
           "400": {
             "description": "Invalid JSON",
             "content": {
@@ -2980,7 +3005,7 @@
             }
           },
           "422": {
-            "description": "Validation failure",
+            "description": "INVALID_URL or NOT_PRODUCT_LINK. Shop links cannot generate a product cashback link.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2999,6 +3024,16 @@
               }
             }
           },
+          "502": {
+            "description": "URL_RESOLVE_FAILED or Shopee product/link request failure. No incoming URL or token is exposed in the message.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "503": {
             "description": "Dependency not configured or unavailable",
             "content": {
@@ -3009,25 +3044,12 @@
               }
             }
           },
-          "200": {
-            "description": "Created short link and signed 7-day tracking token without persisting a link or order.",
+          "504": {
+            "description": "SHOPEE_TIMEOUT during URL resolution or the Shopee request. Explicit retry is allowed.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/AffiliateLinkCreated"
-                    },
-                    "meta": {
-                      "$ref": "#/components/schemas/Meta"
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "meta"
-                  ]
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -3043,7 +3065,8 @@
             }
           }
         },
-        "summary": "POST /affiliate-links"
+        "summary": "POST /affiliate-links",
+        "description": "Resolve the incoming product link, discard incoming attribution, then generate a new short link with system publisher and authenticated customer tracking. New records store the canonical product URL as original_url. Shop links return 422 NOT_PRODUCT_LINK."
       }
     },
     "/orders": {
@@ -8802,31 +8825,6 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data",
-                    "meta"
-                  ],
-                  "properties": {
-                    "data": {},
-                    "meta": {
-                      "type": "object",
-                      "properties": {
-                        "requestId": {
-                          "type": "string"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
           "400": {
             "description": "Invalid JSON",
             "content": {
@@ -8896,6 +8894,16 @@
                 }
               }
             }
+          },
+          "410": {
+            "description": "Use the unified Shopee settings form",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -8908,7 +8916,9 @@
             }
           }
         },
-        "summary": "PATCH /admin/affiliate-channels/{id}"
+        "summary": "PATCH /admin/affiliate-channels/{id}",
+        "deprecated": true,
+        "description": "Shopee configuration moved to /admin/browser/settings. Returns 410 for Shopee; other channels remain demo-only."
       }
     },
     "/admin/browser": {
@@ -11146,42 +11156,8 @@
             "session": []
           }
         ],
-        "description": "Saves the Shopee Affiliate ID in channel settings. Requires settings permission, CSRF and recent password authentication; does not enable tracking.",
+        "description": "Shopee configuration moved to /admin/browser/settings. Returns 410 for Shopee; other channels remain demo-only.",
         "responses": {
-          "200": {
-            "description": "Saved Affiliate ID",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "data": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "publisher": {
-                          "type": "string",
-                          "minLength": 0,
-                          "maxLength": 32
-                        }
-                      },
-                      "required": [
-                        "publisher"
-                      ]
-                    },
-                    "meta": {
-                      "$ref": "#/components/schemas/Meta"
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "meta"
-                  ]
-                }
-              }
-            }
-          },
           "401": {
             "description": "Session required",
             "content": {
@@ -11204,6 +11180,16 @@
           },
           "422": {
             "description": "Invalid Affiliate ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Use the unified Shopee settings form",
             "content": {
               "application/json": {
                 "schema": {
@@ -11249,7 +11235,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/affiliate-links/{id}": {
@@ -11296,6 +11283,9 @@
           }
         ],
         "responses": {
+          "204": {
+            "description": "Link deleted; no response body"
+          },
           "400": {
             "description": "Invalid JSON",
             "content": {
@@ -11318,6 +11308,16 @@
           },
           "403": {
             "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Link not found or owned by another customer",
             "content": {
               "application/json": {
                 "schema": {
@@ -11365,19 +11365,6 @@
                 }
               }
             }
-          },
-          "404": {
-            "description": "Link not found or owned by another customer",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "204": {
-            "description": "Link deleted; no response body"
           }
         },
         "summary": "DELETE /affiliate-links/{id}",
@@ -11471,6 +11458,16 @@
               }
             }
           },
+          "404": {
+            "description": "Link not found or owned by another customer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "409": {
             "description": "State or idempotency conflict",
             "content": {
@@ -11510,9 +11507,115 @@
                 }
               }
             }
+          }
+        },
+        "summary": "GET /affiliate-links/{id}"
+      }
+    },
+    "/admin/browser/settings": {
+      "get": {
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "description": "Administrator-only. Writes require CSRF and recent password authentication. Configuration saves are atomic and version checked; verification proof is server-owned.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ShopeeSettings"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Administrator, CSRF or recent authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "404": {
-            "description": "Link not found or owned by another customer",
+            "description": "Verification not found for this origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale configuration, verification running, or proof missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid configuration or product URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Shopee or Chrome unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -11522,7 +11625,480 @@
             }
           }
         },
-        "summary": "GET /affiliate-links/{id}"
+        "summary": "GET /admin/browser/settings",
+        "parameters": [
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          }
+        ],
+        "operationId": "get_admin_browser_settings",
+        "tags": [
+          "Internal"
+        ]
+      },
+      "put": {
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "description": "Administrator-only. Writes require CSRF and recent password authentication. Configuration saves are atomic and version checked; verification proof is server-owned.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ShopeeSettings"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Administrator, CSRF or recent authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Verification not found for this origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale configuration, verification running, or proof missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid configuration or product URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Shopee or Chrome unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "PUT /admin/browser/settings",
+        "parameters": [
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 500
+            },
+            "description": "Token from GET /me; Origin must match the configured frontend."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShopeeSettingsInput"
+              }
+            }
+          }
+        },
+        "operationId": "put_admin_browser_settings",
+        "tags": [
+          "Internal"
+        ]
+      }
+    },
+    "/admin/browser/verifications": {
+      "post": {
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "description": "Administrator-only. Writes require CSRF and recent password authentication. Configuration saves are atomic and version checked; verification proof is server-owned.",
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ShopeeVerification"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Administrator, CSRF or recent authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Verification not found for this origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale configuration, verification running, or proof missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid configuration or product URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Shopee or Chrome unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "POST /admin/browser/verifications",
+        "parameters": [
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 500
+            },
+            "description": "Token from GET /me; Origin must match the configured frontend."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShopeeVerificationInput"
+              }
+            }
+          }
+        },
+        "operationId": "post_admin_browser_verifications",
+        "tags": [
+          "Internal"
+        ]
+      }
+    },
+    "/admin/browser/verifications/{id}": {
+      "get": {
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "description": "Administrator-only. Writes require CSRF and recent password authentication. Configuration saves are atomic and version checked; verification proof is server-owned.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ShopeeVerification"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Administrator, CSRF or recent authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Verification not found for this origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale configuration, verification running, or proof missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid configuration or product URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Shopee or Chrome unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "GET /admin/browser/verifications/{id}",
+        "parameters": [
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "operationId": "get_admin_browser_verifications_id",
+        "tags": [
+          "Internal"
+        ]
       }
     }
   },
@@ -11750,7 +12326,8 @@
             "type": "string",
             "format": "uri",
             "maxLength": 2048,
-            "pattern": "^https://"
+            "pattern": "^https://",
+            "description": "Shopee product URL, including another affiliate's short link, /opaanlp landing URL or /an_redir origin_link wrapper. Shop links are rejected with NOT_PRODUCT_LINK. Resolution is limited to five redirects and eight seconds."
           }
         },
         "required": [
@@ -13932,6 +14509,313 @@
           "previewAvailable"
         ],
         "description": "Customer reward range after applying the internal policy; no internal configuration is exposed."
+      },
+      "ProductCheck": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "shopId": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "itemId": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "productLink": {
+            "type": "string",
+            "format": "uri",
+            "description": "Canonical https://shopee.vn/product/{shop}/{item} URL with incoming affiliate, advertising and token parameters removed."
+          },
+          "checkedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "estimated": {
+            "type": "boolean"
+          },
+          "schemaVerified": {
+            "type": "boolean"
+          },
+          "productName": {
+            "type": "string"
+          },
+          "commissionCap": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "price": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "commission": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "sellerCommission": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "shopeeCommission": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "commissionRate": {
+            "type": "number",
+            "minimum": 0
+          },
+          "sellerCommissionRate": {
+            "type": "number",
+            "minimum": 0
+          },
+          "shopeeCommissionRate": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "shopId",
+          "itemId",
+          "productLink",
+          "checkedAt",
+          "estimated",
+          "schemaVerified"
+        ]
+      },
+      "ShopeeSettingsInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "publisher",
+          "version",
+          "enabled",
+          "priceScale",
+          "mode",
+          "executablePath",
+          "profilePath",
+          "headless",
+          "remoteUrl"
+        ],
+        "properties": {
+          "publisher": {
+            "type": "string",
+            "pattern": "^[0-9]{0,32}$",
+            "description": "Shared Shopee Affiliate ID."
+          },
+          "version": {
+            "type": "string",
+            "description": "Opaque optimistic concurrency version returned by GET."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Requires backend proof for the current configuration."
+          },
+          "priceScale": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 1000000000,
+            "default": 100000
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "local",
+              "remote"
+            ]
+          },
+          "executablePath": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "profilePath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "headless": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "remoteUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "HTTP 127.0.0.1 origin with an explicit port; no credentials, query or path."
+          }
+        }
+      },
+      "ShopeeSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "publisher",
+          "version",
+          "enabled",
+          "priceScale",
+          "mode",
+          "executablePath",
+          "profilePath",
+          "headless",
+          "remoteUrl",
+          "revision",
+          "trackingVerified",
+          "schemaVerified",
+          "verifiedAt"
+        ],
+        "properties": {
+          "publisher": {
+            "type": "string",
+            "pattern": "^[0-9]{0,32}$",
+            "description": "Shared Shopee Affiliate ID."
+          },
+          "version": {
+            "type": "string",
+            "description": "Opaque optimistic concurrency version returned by GET."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Requires backend proof for the current configuration."
+          },
+          "priceScale": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 1000000000,
+            "default": 100000
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "local",
+              "remote"
+            ]
+          },
+          "executablePath": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "profilePath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "headless": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "remoteUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "HTTP 127.0.0.1 origin with an explicit port; no credentials, query or path."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "readOnly": true
+          },
+          "trackingVerified": {
+            "type": "boolean",
+            "readOnly": true
+          },
+          "schemaVerified": {
+            "type": "boolean",
+            "readOnly": true
+          },
+          "verifiedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "readOnly": true
+          }
+        }
+      },
+      "ShopeeVerification": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "version",
+          "status",
+          "stage",
+          "createdAt",
+          "expiresAt",
+          "finishedAt",
+          "errorCode",
+          "errorMessage"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "stage": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "errorCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "errorMessage": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "ShopeeVerificationInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version",
+          "productUrl"
+        ],
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "productUrl": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          }
+        }
       }
     }
   }

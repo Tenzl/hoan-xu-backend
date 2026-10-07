@@ -14,7 +14,7 @@ if [ "${HOANXU_TINI_STARTED:-}" != true ]; then
   exec /usr/bin/tini -s -- "$0" "$@"
 fi
 
-if [ "${BROWSER_MODE:-local}" != remote ] || [ "${CHROME_SSH_TUNNEL_ENABLED:-true}" != true ]; then
+if [ "${CHROME_SSH_TUNNEL_ENABLED:-true}" != true ]; then
   exec /app/api
 fi
 # False is only for tests or a separately supervised loopback tunnel.
@@ -24,7 +24,6 @@ fi
 [[ "$CHROME_SSH_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]] || { echo 'Invalid SSH host' >&2; exit 1; }
 [[ "${CHROME_SSH_USER:-chrome-tunnel}" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo 'Invalid SSH user' >&2; exit 1; }
 [[ "${CHROME_SSH_PORT:-22}" =~ ^[0-9]+$ ]] || { echo 'Invalid SSH port' >&2; exit 1; }
-[ "${CHROME_REMOTE_URL:-http://127.0.0.1:9222}" = http://127.0.0.1:9222 ] || { echo 'Managed tunnel uses CDP port 9222' >&2; exit 1; }
 [ "${REMOTE_BROWSER_UPSTREAM:-http://127.0.0.1:6080}" = http://127.0.0.1:6080 ] || { echo 'Managed tunnel uses display port 6080' >&2; exit 1; }
 
 umask 077

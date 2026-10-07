@@ -13,13 +13,16 @@ import (
 
 // NewRemote controls an independently supervised browser. Authentication lives
 // exclusively in its default profile; no cookies are imported or exported.
-func NewRemote(endpoint string) (*Manager, error) {
+func NewRemote(endpoint string, options ...Option) (*Manager, error) {
 	if _, err := remoteEndpoint(endpoint); err != nil {
 		return nil, err
 	}
 	m := NewManual("", "")
 	m.remoteURL = endpoint
 	m.autoStart = true
+	for _, option := range options {
+		option(m)
+	}
 	return m, nil
 }
 

@@ -67,6 +67,8 @@ func NewLazy(path, profile string, cookies *CookieStore) *Manager {
 
 type Option func(*Manager)
 
+func WithAutoStart(enabled bool) Option { return func(m *Manager) { m.autoStart = enabled } }
+
 // WithHeadless configures the managed browser before it starts.
 func WithHeadless(headless bool) Option {
 	return func(m *Manager) { m.headless = headless }

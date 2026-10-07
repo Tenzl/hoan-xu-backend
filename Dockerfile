@@ -21,8 +21,7 @@ COPY database/migrations /app/database/migrations
 COPY deploy/docker /app/deploy
 RUN sed -i 's/\r$//' /app/deploy/*.sh \
  && chmod 755 /app/deploy/*.sh
-ENV HOST=0.0.0.0 PORT=10000 BROWSER_MODE=remote \
-    CHROME_REMOTE_URL=http://127.0.0.1:9222 PRIVATE_DIR=/var/data/files \
+ENV HOST=0.0.0.0 PORT=10000 PRIVATE_DIR=/var/data/files \
     REMOTE_BROWSER_UPSTREAM=http://127.0.0.1:6080 \
     REMOTE_BROWSER_ENABLED=true
 # Only Go is public. CDP and the display arrive through a loopback SSH tunnel.

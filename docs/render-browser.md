@@ -32,8 +32,6 @@ Không tái tạo encryption key. Migration vẫn chạy riêng bằng `/app/adm
 
 | Biến | Giá trị |
 | --- | --- |
-| `BROWSER_MODE` | `remote` |
-| `CHROME_REMOTE_URL` | `http://127.0.0.1:9222` |
 | `REMOTE_BROWSER_ENABLED` | `true` |
 | `REMOTE_BROWSER_UPSTREAM` | `http://127.0.0.1:6080` |
 | `REMOTE_BROWSER_ORIGIN` | Origin HTTPS backend Render, không có slash cuối |
@@ -46,6 +44,14 @@ Không tái tạo encryption key. Migration vẫn chạy riêng bằng `/app/adm
 | `CHROME_SSH_KNOWN_HOSTS` | Nội dung known_hosts đã xác minh fingerprint |
 | `PRIVATE_DIR` | `/var/data/files` |
 | `COOKIE_SECURE` | `true` |
+
+Chế độ Chrome `remote` và địa chỉ `http://127.0.0.1:9222` được lưu trong form
+**Đăng nhập Shopee → Kết nối Shopee** cho origin frontend production. Trước khi
+đưa API mới vào sử dụng, chạy migration 15 và chuyển cấu hình env cũ bằng
+`/app/admin import-shopee-settings` một lần. Không đánh dấu đã xác minh từ env;
+đăng nhập, kiểm tra GQL thật rồi bật tạo link trong quản trị. Xem
+[luồng cấu hình đồng bộ](shopee-settings.md). SSH supervisor chạy theo
+`CHROME_SSH_TUNNEL_ENABLED` độc lập với chế độ Chrome trong database.
 
 File cấu hình production tổng là `env.prod` hiện có, nằm ngoài Git. Cập nhật
 các biến trong bảng vào file này, giữ nguyên secrets database/encryption/OAuth
@@ -107,7 +113,7 @@ Khi router không tạo request sản phẩm sau 3 giây, checker mở trang the
 thông thường. Kiểm tra lại đúng sản phẩm trong cùng tab cũng reload để nhận
 response mới; response cũ bắt đầu trước lượt kiểm tra không được chấp nhận.
 Redirect đăng nhập/xác minh (kể cả trong SPA) và API 401/403 vẫn làm phiên hết
-hiệu lực. Cả `BROWSER_MODE=local` và `remote` đều giữ hai tab worker để tái sử
+hiệu lực. Cả chế độ Chrome local và remote trong quản trị đều giữ hai tab worker để tái sử
 dụng; tab đăng nhập/xác minh của admin được giữ riêng. Worker lỗi hoặc timeout
 được đóng và tạo lại khi cần.
 
@@ -139,8 +145,8 @@ không dùng để kết luận độ trễ Render → EC2.
 
 ## Development, kiểm thử và rollback
 
-Development giữ `BROWSER_MODE=local`, `CHROME_HEADLESS=false`, `CHROME_PATH` và
-profile trên máy developer; chạy `scripts/dev.ps1` hoặc `go run ./cmd/api` như
+Development chọn Chrome local, đường dẫn và profile trong form **Kết nối Shopee**;
+Chrome luôn có cửa sổ. Chạy `scripts/dev.ps1` hoặc `go run ./cmd/api` như
 trước. Local không kết nối EC2: mở Chrome từ admin, đăng nhập rồi kiểm tra phiên
 để tải sẵn hai tab worker. Các sản phẩm khác nhau dùng router trong tab đã tải
 sẵn như remote; kiểm tra lại cùng sản phẩm vẫn reload để lấy response mới.
@@ -156,7 +162,8 @@ ssh -N -T -i render-chromium -o StrictHostKeyChecking=yes \
   -L 127.0.0.1:6080:127.0.0.1:6080 chrome-tunnel@EC2_ELASTIC_IP
 ```
 
-Đặt `BROWSER_MODE=remote` trong env development; `go run` không tự launch SSH.
+Chọn Chrome từ xa và địa chỉ `http://127.0.0.1:9222` trong form quản trị;
+`go run` không tự launch SSH.
 Muốn mở màn hình thì bật `REMOTE_BROWSER_ENABLED`, đặt origin backend localhost
 và bridge secret. `CHROME_SSH_TUNNEL_ENABLED=false` chỉ dùng với Docker test hoặc
 tunnel được quản lý bên ngoài; không trỏ CDP ra địa chỉ public.

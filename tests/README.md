@@ -30,4 +30,12 @@ The runner uses Go's `-overlay` flag to compile the stored test sources inside t
 
 Add a test under `unit/<package>/` or `integration/<package>/` with its existing package declaration and a unique `_test.go` filename. The runner discovers it automatically. Read runtime fixtures from `../../tests/fixtures/` because Go tests run in their original internal package directory.
 
+To verify the two public input-link examples without generating affiliate links,
+set `SHOPEE_LIVE_RESOLVE_TEST=1` and run
+`go run ./tests/run.go test -run TestLiveAffiliateInputSamples -v`.
+This opt-in test resolves one product link and rejects one shop link; ordinary
+resolver and attribution tests use fixtures and the dedicated test database.
+
 For explicitly authorized native Shopee acceptance, an already authenticated local Chrome may be tested with `SHOPEE_LIVE_CDP_URL=http://127.0.0.1:<debug-port>` and `go run ./tests/run.go test -run TestLiveShopeeSignedSubIDs -v`. This creates one disposable short link using test attribution claims and does not access the application database. The test is skipped by default. Production attribution still requires a real report carrying the full SubIDs.
+
+Unified Shopee configuration tests cover atomic saves, conflict versions, read-only proof, asynchronous verification, stale completion, one active job per origin, disabled manual mode and diagnostics without financial writes. Migration 15 is included in each isolated API test schema. Operator native acceptance uses the same flow with `admin verify-shopee-settings --product-url <Shopee URL>` after the runtime configuration has been imported.

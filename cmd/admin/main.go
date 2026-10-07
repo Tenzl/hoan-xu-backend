@@ -1,14 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/chromedp/chromedp"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -33,9 +31,15 @@ func main() {
 }
 func run() error {
 	if len(os.Args) < 2 {
-		return errors.New("commands: migrate, create, reset, shopee-login, key, import-legacy")
+		return errors.New("commands: migrate, create, reset, shopee-login, import-shopee-settings, verify-shopee-settings, key, import-legacy")
 	}
 	command := os.Args[1]
+	if command == "verify-shopee-settings" {
+		return verifyShopeeSettings(os.Args[2:])
+	}
+	if command == "import-shopee-settings" {
+		return importShopeeSettings()
+	}
 	if command == "import-legacy" {
 		return importLegacy(os.Args[2:])
 	}
@@ -69,26 +73,9 @@ func run() error {
 		return e
 	}
 	if command == "shopee-login" {
-		root, e := filepath.Abs(os.Getenv("CHROME_PROFILE"))
-		if e != nil {
-			return e
-		}
-		opts := append([]chromedp.ExecAllocatorOption{}, chromedp.DefaultExecAllocatorOptions[:]...)
-		opts = append(opts, chromedp.UserDataDir(root), chromedp.Flag("headless", false))
-		if p := os.Getenv("CHROME_PATH"); p != "" {
-			opts = append(opts, chromedp.ExecPath(p))
-		}
-		ctx, c := chromedp.NewExecAllocator(context.Background(), opts...)
-		defer c()
-		ctx, close := chromedp.NewContext(ctx)
-		defer close()
-		if e = chromedp.Run(ctx, chromedp.Navigate("https://affiliate.shopee.vn/dashboard")); e != nil {
-			return e
-		}
-		fmt.Println("Đăng nhập thủ công. Nhấn Enter sau khi dashboard sẵn sàng. Dừng backend browser trước khi dùng lệnh này.")
-		_, e = bufio.NewReader(os.Stdin).ReadString('\n')
-		return e
+		return loginShopee()
 	}
+
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
 	username := fs.String("username", "", "username")
 	name := fs.String("name", "Quản trị", "display name")

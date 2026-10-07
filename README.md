@@ -41,11 +41,19 @@ Keep the source export and backup in ignored `private-data/`, outside Git.
 
 ## Shopee
 
-Local development uses `BROWSER_MODE=local`, `CHROME_PATH` and a private `CHROME_PROFILE`; Chrome starts when an administrator opens it. Production uses `BROWSER_MODE=remote` and `CHROME_REMOTE_URL=http://127.0.0.1:9222` over an SSH tunnel to Chromium on EC2. Remote Chrome runs continuously and Go probes its session on startup/reconnect. Open **Đăng nhập Shopee → Mở Chrome trên server**, sign in, then choose **Tôi đã đăng nhập — Kiểm tra phiên**. The API does not import, export or restore Shopee cookies from files or the database.
+Shopee and Chrome settings are entered in **Đăng nhập Shopee → Kết nối Shopee** and saved in the private database configuration. One form saves the shared Affiliate ID plus origin-specific Chrome settings and customer-link activation atomically. Choose local Chrome with its executable/profile or remote Chrome at `http://127.0.0.1:9222`. SSH/noVNC remain deployment infrastructure. Open Chrome, sign in, check the existing session, then verify a product and all five signed SubIDs through native Shopee GQL before enabling customer links. The API never imports or exports cookies.
 
 Both modes preload and reuse two worker tabs after session verification, keeping the administrator's login tab separate. Local mode runs Chrome on the developer's computer; it does not connect to EC2. Failed or timed-out worker tabs are closed and replaced when needed.
 
-Enter the Shopee **Affiliate ID (Shopee Publisher)** on the same page and save it. The ID is stored in `affiliate_channels.settings`; no `SHOPEE_PUBLISHER` environment variable is required. Link creation still requires this configuration, an available channel and verified tracking. The account signed into Chrome must be the corresponding Affiliate account. Saving an ID or signing in does not automatically enable verified tracking. Production Chrome keeps its profile on EC2 EBS, independently of Render restarts; Shopee can still request login/verification. Historical migration 10 and its private table remain, but the API no longer uses their cookie data.
+Configuration updates require an administrator, CSRF and recent password authentication. Server-owned verification proof is bound to the current configuration; editing the Affiliate ID, connection/profile or price scale invalidates it. Version conflicts return 409 without overwriting the draft. Old publisher/channel write APIs return 410. See [unified Shopee setup and migration](docs/shopee-settings.md).
+
+`POST /api/v1/product-checks` and `POST /api/v1/affiliate-links` accept product
+URLs, other affiliates' `s.shopee.vn` short links, `/opaanlp/{shop}/{item}` URLs
+and `/an_redir?origin_link=...` wrappers. Resolution follows at most five HTTP
+redirects within eight seconds and stops as soon as product IDs are found.
+Incoming attribution and tokens are discarded; new records store a canonical
+`https://shopee.vn/product/{shop}/{item}` URL. Shop links return
+`422 NOT_PRODUCT_LINK`; network failures and timeouts keep separate error codes.
 
 `POST /api/v1/affiliate-links` generates an official Shopee short link through
 `POST /api/v3/gql?q=productOfferLinks` (`batchGetProductOfferLink`) in a logged-in
@@ -79,7 +87,7 @@ Live native GQL acceptance passed on 2026-10-07 with the exact five SubIDs, incl
 
 `CHROME_HEADLESS=false` opens Chromium for manual verification on a desktop. `true` runs it hidden. Shopee may still require manual access verification; successful desktop checks do not guarantee cloud/headless operation. No CAPTCHA or two-factor verification is automated.
 
-Product units were compared with ten Affiliate pages; sanitized evidence is in `tests/fixtures/affiliate/`. Set `SHOPEE_SCHEMA_VERIFIED=true` and `SHOPEE_PRICE_SCALE=100000` to enable the verified product parser. Affiliate tracking must be independently confirmed before enabling `SHOPEE_TRACKING_VERIFIED`.
+Product units were compared with ten Affiliate pages; sanitized evidence is in `tests/fixtures/affiliate/`. The default price scale is 100000, editable in the form's advanced settings. Verification normalizes actual product data and exercises native short-link GQL with a six-day token, `0p63`, and HMAC. It creates only an administrative verification record, with no customer link/order/wallet writes. Commission attribution is still established by original Shopee reports.
 
 ## Validation and contract
 

@@ -26,10 +26,6 @@ services:
         value: "true"
       - key: REMOTE_BROWSER_ENABLED
         value: "true"
-      - key: BROWSER_MODE
-        value: remote
-      - key: CHROME_REMOTE_URL
-        value: http://127.0.0.1:9222
       - key: REMOTE_BROWSER_UPSTREAM
         value: http://127.0.0.1:6080
       - key: CHROME_SSH_TUNNEL_ENABLED
@@ -54,11 +50,3 @@ services:
         sync: false
       - key: GOOGLE_CALLBACK_URL
         value: https://hoan-xu.vercel.app/api/v1/auth/google/callback
-      - key: SHOPEE_ENABLED
-        value: "false"
-      - key: SHOPEE_TRACKING_VERIFIED
-        value: "false"
-      - key: SHOPEE_SCHEMA_VERIFIED
-        value: "true"
-      - key: SHOPEE_PRICE_SCALE
-        value: "100000"

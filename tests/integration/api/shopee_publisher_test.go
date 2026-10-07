@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -66,36 +65,17 @@ func TestShopeePublisherConfigurationRequiresSettingsCSRFAndReauthentication(t *
 	if _, err := store.Pool.Exec(ctx, `UPDATE sessions SET reauthenticated_at=now() WHERE id=$1`, au.SessionID); err != nil {
 		t.Fatal(err)
 	}
-	for _, body := range []string{`{}`, `{"publisher":null}`, `{"publisher":"abc"}`, `{"publisher":"12.3"}`, `{"publisher":"` + strings.Repeat("1", 33) + `"}`} {
+	for _, body := range []string{`{"publisher":"abc"}`, `{"publisher":"123456789"}`, `{"publisher":""}`} {
 		w := request("PUT", "/admin/browser/publisher", at, au.CSRF, body)
-		if w.Code != 422 {
-			t.Fatal("invalid affiliate ID accepted", w.Code, w.Body.String())
+		if w.Code != 410 {
+			t.Fatal("legacy publisher route accepted", w.Code, w.Body.String())
 		}
 	}
-	if _, err := store.Pool.Exec(ctx, `UPDATE affiliate_channels SET settings='{"template":"https://s.shopee.vn/an_redir"}' WHERE id='shopee'`); err != nil {
-		t.Fatal(err)
+	var publisher string
+	if err := store.Pool.QueryRow(ctx, `SELECT coalesce(settings->>'publisher','') FROM affiliate_channels WHERE id='shopee'`).Scan(&publisher); err != nil || publisher != "" {
+		t.Fatal("retired endpoint mutated publisher", publisher, err)
 	}
-	w := request("PUT", "/admin/browser/publisher", at, au.CSRF, `{"publisher":" 123456789 "}`)
-	if w.Code != 200 {
-		t.Fatal(w.Code, w.Body.String())
-	}
-	var template, publisher, status string
-	if err := store.Pool.QueryRow(ctx, `SELECT settings->>'template',settings->>'publisher',status FROM affiliate_channels WHERE id='shopee'`).Scan(&template, &publisher, &status); err != nil || template != "https://s.shopee.vn/an_redir" || publisher != "123456789" || status == "available" || aff.TrackingVerified {
-		t.Fatal("saving publisher changed tracking/template", err)
-	}
-	w = request("GET", "/admin/browser", at, "", "")
-	var response struct {
-		Data struct {
-			Publisher string `json:"publisher"`
-		} `json:"data"`
-	}
-	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &response) != nil || response.Data.Publisher != publisher {
-		t.Fatal("publisher not restored in admin", w.Code, w.Body.String())
-	}
-	w = request("PUT", "/admin/browser/publisher", at, au.CSRF, `{"publisher":""}`)
-	if w.Code != 200 {
-		t.Fatal("could not clear publisher", w.Code)
-	}
+
 }
 
 func TestAffiliateShortLinkAcceptsDatabasePublisherWithoutEnvironmentVariable(t *testing.T) {

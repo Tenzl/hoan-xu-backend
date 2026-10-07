@@ -4,12 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"io"
 	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -18,7 +18,7 @@ func ValidateURL(raw string) (*url.URL, error) {
 		return nil, errors.New("URL quá dài")
 	}
 	u, e := url.Parse(raw)
-	if e != nil || u.Scheme != "https" || u.User != nil || u.Port() != "" {
+	if e != nil || u.Scheme != "https" || u.User != nil || u.Host != u.Hostname() {
 		return nil, errors.New("Link phải là HTTPS Shopee, không có userinfo/port")
 	}
 	switch u.Hostname() {
@@ -31,19 +31,51 @@ func ValidateURL(raw string) (*url.URL, error) {
 
 var direct = regexp.MustCompile(`/product/([0-9]+)/([0-9]+)(?:/|$)`)
 var slug = regexp.MustCompile(`-i\.([0-9]+)\.([0-9]+)(?:/|$)`)
+var landing = regexp.MustCompile(`^/opaanlp/([0-9]+)/([0-9]+)(?:/|$)`)
+var shopPath = regexp.MustCompile(`^/(?:shop/[0-9]+|[A-Za-z0-9_][A-Za-z0-9_.-]{0,99})/?$`)
+var errNotProduct = errors.New("Link gian hàng không thể ghi nhận hoàn xu")
+var errResolveFailed = errors.New("Chưa mở được link Shopee. Bạn thử lại nhé.")
+
+func isShopURL(u *url.URL) bool {
+	if u.Hostname() != "shopee.vn" && u.Hostname() != "www.shopee.vn" {
+		return false
+	}
+	// These single-segment routes are not shop usernames.
+	switch strings.Trim(u.Path, "/") {
+	case "", "login", "verify", "buyer", "search", "cart", "mall", "flash_sale", "product", "opaanlp", "an_redir", "universal-link", "shop", "user", "blog", "m", "api":
+		return false
+	}
+	return shopPath.MatchString(u.Path)
+}
 
 func ProductIDs(raw string) (string, string, error) {
-	u, e := ValidateURL(raw)
+	u, e := unwrapAffiliateURL(raw)
 	if e != nil {
 		return "", "", e
 	}
-	for _, r := range []*regexp.Regexp{direct, slug} {
+	for _, r := range []*regexp.Regexp{direct, slug, landing} {
 		p := r.FindStringSubmatch(u.Path)
 		if len(p) == 3 {
 			return p[1], p[2], nil
 		}
 	}
-	return "", "", errors.New("Không tìm thấy shop/item ID")
+	return "", "", errors.New("Link này chưa có sản phẩm cụ thể. Hãy mở link và sao chép link món bạn muốn mua.")
+}
+
+func unwrapAffiliateURL(raw string) (*url.URL, error) {
+	for depth := 0; depth <= 5; depth++ {
+		u, e := ValidateURL(raw)
+		if e != nil {
+			return nil, e
+		}
+		// Decode only Shopee's affiliate wrapper, validating each nested URL.
+		// Attribution parameters never enter the resulting product URL.
+		if u.Path != "/an_redir" || u.Query().Get("origin_link") == "" {
+			return u, nil
+		}
+		raw = u.Query().Get("origin_link")
+	}
+	return nil, errors.New("Link có quá nhiều chuyển hướng. Hãy dán link sản phẩm trực tiếp.")
 }
 func publicIP(ip net.IP) bool {
 	a, ok := netip.AddrFromSlice(ip)
@@ -93,26 +125,56 @@ func safeRedirect(r *http.Request, via []*http.Request) error {
 	return e
 }
 func Resolve(ctx context.Context, raw string) (string, string, string, error) {
-	if _, e := ValidateURL(raw); e != nil {
-		return "", "", "", e
-	}
-	if shop, item, e := ProductIDs(raw); e == nil {
-		return shop, item, "https://shopee.vn/product/" + shop + "/" + item, nil
-	}
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
 	transport := &http.Transport{Proxy: nil, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}, DialContext: safeDial(net.DefaultResolver.LookupIP, dialer.DialContext)}
 	defer transport.CloseIdleConnections()
-	client := &http.Client{Timeout: 8 * time.Second, Transport: transport, CheckRedirect: safeRedirect}
-	req, e := http.NewRequestWithContext(ctx, "GET", raw, nil)
-	if e != nil {
-		return "", "", "", e
+	client := &http.Client{Timeout: 8 * time.Second, Transport: transport}
+	// One deadline covers all hops, rather than allowing eight seconds per hop.
+	scope, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	return resolveWithClient(scope, raw, client)
+}
+
+func resolveWithClient(ctx context.Context, raw string, client *http.Client) (string, string, string, error) {
+	noRedirect := *client
+	noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	for hop := 0; hop <= 5; hop++ {
+		if err := ctx.Err(); err != nil {
+			return "", "", "", err
+		}
+		u, e := unwrapAffiliateURL(raw)
+		if e != nil {
+			return "", "", "", e
+		}
+		if shop, item, e := ProductIDs(u.String()); e == nil {
+			return shop, item, "https://shopee.vn/product/" + shop + "/" + item, nil
+		}
+		if isShopURL(u) {
+			return "", "", "", errNotProduct
+		}
+		req, e := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
+		if e != nil {
+			return "", "", "", e
+		}
+		resp, e := noRedirect.Do(req)
+		if e != nil {
+			return "", "", "", e
+		}
+		// The Location header is sufficient; do not download redirect page bodies.
+		resp.Body.Close()
+		switch resp.StatusCode {
+		case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+			next, err := resp.Location()
+			if err != nil {
+				return "", "", "", errors.New("Chưa mở được link này. Hãy thử link sản phẩm trực tiếp.")
+			}
+			raw = next.String()
+		default:
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				return "", "", "", errResolveFailed
+			}
+			return "", "", "", errors.New("Link này chưa có sản phẩm cụ thể. Hãy mở link và sao chép link món bạn muốn mua.")
+		}
 	}
-	resp, e := client.Do(req)
-	if e != nil {
-		return "", "", "", e
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
-	shop, item, e := ProductIDs(resp.Request.URL.String())
-	return shop, item, resp.Request.URL.String(), e
+	return "", "", "", errors.New("Link có quá nhiều chuyển hướng. Hãy dán link sản phẩm trực tiếp.")
 }

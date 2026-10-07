@@ -25,6 +25,10 @@ import (
 )
 
 func (s *Server) adminRoutes(r chi.Router) {
+	r.Post("/admin/browser/verifications", s.allowed("settings", true, s.startShopeeVerification))
+	r.Get("/admin/browser/verifications/{id}", s.allowed("settings", false, s.getShopeeVerification))
+	r.Get("/admin/browser/settings", s.allowed("settings", false, s.getShopeeSettings))
+	r.Put("/admin/browser/settings", s.allowed("settings", true, s.putShopeeSettings))
 	r.Get("/admin/cashback-policies/current", s.allowed("settings", false, func(w http.ResponseWriter, r *http.Request) {
 		p, e := (&cashback.Service{Store: s.Store}).Current(r.Context())
 		s.reply(w, r, 200, p, e)
@@ -240,7 +244,11 @@ func (s *Server) adminRoutes(r chi.Router) {
 		s.reply(w, r, 200, p, e)
 	}))
 	r.Get("/admin/affiliate-channels", s.allowed("settings", false, func(w http.ResponseWriter, r *http.Request) {
-		s.list(w, r, `SELECT jsonb_build_object('id',id,'name',name,'status',status,'settings',settings) FROM affiliate_channels ORDER BY id`)
+		status := "not_configured"
+		if s.Affiliate != nil && s.Affiliate.CheckEnabled() && s.Affiliate.TrackingVerified {
+			status = "available"
+		}
+		s.list(w, r, `SELECT jsonb_build_object('id',id,'name',name,'status',CASE WHEN id='shopee' AND $1::boolean THEN $2::text ELSE status END,'settings',settings-'runtimeConfigs') FROM affiliate_channels ORDER BY id`, s.Affiliate != nil && s.Affiliate.ManagedConfig, status)
 	}))
 	r.Patch("/admin/affiliate-channels/{id}", s.allowed("settings", true, func(w http.ResponseWriter, r *http.Request) {
 		var p struct {
@@ -255,31 +263,10 @@ func (s *Server) adminRoutes(r chi.Router) {
 			s.reply(w, r, 0, nil, platform.Fail(409, "DEMO_ONLY", "Kênh này vẫn giữ mẫu."))
 			return
 		}
-		if p.Status == "available" && (!s.Affiliate.CheckEnabled() || !s.Affiliate.TrackingVerified) {
-			s.reply(w, r, 0, nil, platform.Fail(409, "TRACKING_NOT_VERIFIED", "Cần xác minh tích hợp và tracking trước khi bật."))
-			return
-		}
-		if p.Status != "available" && p.Status != "not_configured" && p.Status != "temporarily_unavailable" {
-			s.reply(w, r, 0, nil, platform.Fail(422, "INVALID_STATUS", "Trạng thái không hợp lệ."))
-			return
-		}
-		tx, e := s.Store.Pool.Begin(r.Context())
-		if e != nil {
-			s.reply(w, r, 0, nil, e)
-			return
-		}
-		defer tx.Rollback(r.Context())
-		_, e = tx.Exec(r.Context(), `UPDATE affiliate_channels SET status=$2,settings=settings||jsonb_build_object('template',$3::text) WHERE id=$1`, id, p.Status, p.Template)
-		if e == nil {
-			e = platform.Audit(r.Context(), tx, user(r).ID, "channel_updated", id, p)
-		}
-		if e == nil {
-			e = tx.Commit(r.Context())
-		}
-		s.reply(w, r, 200, p, e)
+		s.reply(w, r, 0, nil, platform.Fail(410, "SHOPEE_SETTINGS_MOVED", "Cấu hình Shopee đã chuyển sang form Kết nối Shopee."))
 	}))
 	r.Get("/admin/browser", s.allowed("settings", false, func(w http.ResponseWriter, r *http.Request) {
-		v := map[string]any{"enabled": s.Affiliate.CheckEnabled(), "trackingVerified": s.Affiliate.TrackingVerified, "remoteAvailable": s.RemoteBrowser != nil && user(r).Role == "admin", "localAvailable": s.LocalBrowser && user(r).Role == "admin"}
+		v := map[string]any{"enabled": s.Affiliate.CheckEnabled(), "trackingVerified": s.Affiliate.TrackingVerified, "remoteAvailable": s.RemoteBrowser != nil && s.BrowserMode != "local" && user(r).Role == "admin", "localAvailable": s.LocalBrowser && user(r).Role == "admin"}
 		publisher, err := s.Affiliate.PublisherID(r.Context())
 		if err != nil {
 			s.reply(w, r, 0, nil, err)
@@ -292,19 +279,9 @@ func (s *Server) adminRoutes(r chi.Router) {
 		s.reply(w, r, 200, v, nil)
 	}))
 	r.Put("/admin/browser/publisher", s.allowed("settings", true, func(w http.ResponseWriter, r *http.Request) {
-		var p struct {
-			Publisher *string `json:"publisher"`
-		}
-		if !s.body(w, r, &p) {
-			return
-		}
-		if p.Publisher == nil {
-			s.reply(w, r, 0, nil, platform.Fail(422, "INVALID_AFFILIATE_ID", "Affiliate ID chỉ gồm chữ số, tối đa 32 ký tự."))
-			return
-		}
-		err := s.Affiliate.SavePublisher(r.Context(), user(r).ID, *p.Publisher)
-		s.reply(w, r, 200, map[string]string{"publisher": strings.TrimSpace(*p.Publisher)}, err)
+		s.reply(w, r, 0, nil, platform.Fail(410, "SHOPEE_SETTINGS_MOVED", "Cấu hình Shopee đã chuyển sang form Kết nối Shopee."))
 	}))
+
 	r.Put("/admin/browser/cookies", s.allowed("settings", false, func(w http.ResponseWriter, r *http.Request) {
 		s.reply(w, r, 0, nil, platform.Fail(410, "COOKIE_IMPORT_REMOVED", "Nhập cookie đã được tắt. Mở Chrome trên server để đăng nhập Shopee trực tiếp."))
 	}))
@@ -313,7 +290,7 @@ func (s *Server) adminRoutes(r chi.Router) {
 			s.reply(w, r, 0, nil, platform.Fail(403, "FORBIDDEN", "Chỉ quản trị viên được mở Chrome trên server."))
 			return
 		}
-		if (s.RemoteBrowser == nil && !s.LocalBrowser) || s.Affiliate.Browser == nil {
+		if ((!s.LocalBrowser && s.BrowserMode == "local") || (s.RemoteBrowser == nil && !s.LocalBrowser)) || s.Affiliate.Browser == nil {
 			s.reply(w, r, 0, nil, platform.Fail(503, "BROWSER_UNAVAILABLE", "Chrome từ xa chưa được cấu hình."))
 			return
 		}
@@ -333,7 +310,7 @@ func (s *Server) adminRoutes(r chi.Router) {
 		}
 		defer tx.Rollback(r.Context())
 		action := "remote_browser_opened"
-		if s.RemoteBrowser == nil {
+		if s.LocalBrowser {
 			action = "local_browser_opened"
 		}
 		e = platform.Audit(r.Context(), tx, user(r).ID, action, "browser", map[string]any{})
@@ -344,7 +321,7 @@ func (s *Server) adminRoutes(r chi.Router) {
 			s.reply(w, r, 0, nil, e)
 			return
 		}
-		if s.RemoteBrowser == nil {
+		if s.LocalBrowser {
 			s.reply(w, r, 201, map[string]any{"local": true, "browser": s.Affiliate.Browser.Status()}, nil)
 			return
 		}

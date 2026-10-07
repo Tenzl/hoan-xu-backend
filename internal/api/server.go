@@ -15,6 +15,7 @@ import (
 	"hoanxu/internal/platform"
 	"hoanxu/internal/remotebrowser"
 	"hoanxu/internal/rewards"
+	"hoanxu/internal/shopeeconfig"
 	"hoanxu/internal/users"
 	"hoanxu/internal/wallet"
 	"io"
@@ -23,6 +24,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -35,6 +37,15 @@ type Server struct {
 	Origin, PrivateDir string
 	Secure             bool
 	Mux                *chi.Mux
+	PrepareBrowser     func(shopeeconfig.Config) (func(), error)
+	BrowserMode        string
+	browserMu          sync.RWMutex
+	ConfigVersion      string
+	Lifetime           context.Context
+	VerifyShopee       func(context.Context, shopeeconfig.Config, string) error
+	verificationMu     sync.Mutex
+	verificationWG     sync.WaitGroup
+	cancelVerification context.CancelFunc
 }
 type contextKey string
 
@@ -192,6 +203,7 @@ func New(s *Server) *chi.Mux {
 	r := chi.NewRouter()
 	s.Mux = r
 	r.Use(middleware.RequestID, middleware.Recoverer)
+	r.Use(s.browserConfigLock)
 	if s.RemoteBrowser != nil {
 		r.Mount("/browser", s.RemoteBrowser)
 	}
@@ -223,7 +235,14 @@ func New(s *Server) *chi.Mux {
 			rows, e := s.Store.Queries.ListChannels(r.Context())
 			v := []map[string]string{}
 			for _, c := range rows {
-				v = append(v, map[string]string{"id": c.ID, "name": c.Name, "status": c.Status})
+				status := c.Status
+				if c.ID == "shopee" && s.Affiliate != nil && s.Affiliate.ManagedConfig {
+					status = "not_configured"
+					if s.Affiliate.CheckEnabled() && s.Affiliate.TrackingVerified {
+						status = "available"
+					}
+				}
+				v = append(v, map[string]string{"id": c.ID, "name": c.Name, "status": status})
 			}
 			s.reply(w, r, 200, v, e)
 		})

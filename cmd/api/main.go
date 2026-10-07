@@ -8,17 +8,17 @@ import (
 	"hoanxu/internal/affiliate"
 	"hoanxu/internal/api"
 	"hoanxu/internal/auth"
-	"hoanxu/internal/browser"
 	"hoanxu/internal/imports"
 	"hoanxu/internal/platform"
 	"hoanxu/internal/remotebrowser"
+	"hoanxu/internal/shopeeconfig"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -57,38 +57,32 @@ func run() error {
 	if e != nil {
 		slog.Warn("google_unavailable", "error", e)
 	}
-	enabled := os.Getenv("SHOPEE_ENABLED") == "true"
-	mode := env("BROWSER_MODE", "local")
-	var b *browser.Manager
-	switch mode {
-	case "remote":
-		b, e = browser.NewRemote(env("CHROME_REMOTE_URL", "http://127.0.0.1:9222"))
-		if e != nil {
-			return e
-		}
-	case "local":
-		profile, err := filepath.Abs(env("CHROME_PROFILE", "private-data/chrome-profile"))
-		if err != nil {
-			return err
-		}
-		b = browser.NewManual(os.Getenv("CHROME_PATH"), profile, browser.WithHeadless(env("CHROME_HEADLESS", "false") != "false"))
-	default:
-		return fmt.Errorf("BROWSER_MODE must be local or remote")
+	origin := env("APP_ORIGIN", "http://localhost:3000")
+	if e = shopeeconfig.RecoverVerifications(ctx, store, origin); e != nil {
+		return e
 	}
+	cfg, e := shopeeconfig.Load(ctx, store, origin)
+	if e != nil {
+		return e
+	}
+	b, e := cfg.NewBrowser()
+	if e != nil {
+		return e
+	}
+	var runtimeMu sync.Mutex
+	browserCtx, browserStop := context.WithCancel(ctx)
 	browserDone := make(chan struct{})
-	go func() { b.Run(ctx); close(browserDone) }()
-	defer func() { stop(); <-browserDone }()
-	scale, _ := strconv.ParseInt(os.Getenv("SHOPEE_PRICE_SCALE"), 10, 64)
-	aff := &affiliate.Service{Store: store, Browser: b, Enabled: enabled, TrackingVerified: os.Getenv("SHOPEE_TRACKING_VERIFIED") == "true", SchemaVerified: os.Getenv("SHOPEE_SCHEMA_VERIFIED") == "true", PriceScale: scale}
+	initialCtx, initialDone := browserCtx, browserDone
+	go func() { b.Run(initialCtx); close(initialDone) }()
+	defer func() { runtimeMu.Lock(); defer runtimeMu.Unlock(); browserStop(); <-browserDone }()
+	aff := &affiliate.Service{Store: store, Browser: b, ManagedConfig: true, Enabled: cfg.Enabled, TrackingVerified: cfg.TrackingVerified, SchemaVerified: cfg.SchemaVerified, PriceScale: cfg.PriceScale}
 	private, e := filepath.Abs(env("PRIVATE_DIR", "private-data/files"))
 	if e != nil {
 		return e
 	}
 	server := &api.Server{Store: store, Auth: a, Affiliate: aff, Origin: env("APP_ORIGIN", "http://localhost:3000"), Secure: os.Getenv("COOKIE_SECURE") == "true", PrivateDir: private}
+	defer server.WaitVerifications()
 	if os.Getenv("REMOTE_BROWSER_ENABLED") == "true" {
-		if mode == "local" && (env("CHROME_HEADLESS", "true") != "false" || os.Getenv("DISPLAY") == "") {
-			return fmt.Errorf("remote browser requires CHROME_HEADLESS=false and DISPLAY")
-		}
 		bridgePassword := os.Getenv("REMOTE_BROWSER_BRIDGE_PASSWORD")
 		if bridgePassword == "" {
 			return fmt.Errorf("REMOTE_BROWSER_BRIDGE_PASSWORD is required")
@@ -101,9 +95,43 @@ func run() error {
 	go (&imports.Service{Store: store}).Run(ctx)
 	go maintenance(ctx, store)
 	// A native Chrome window is available only on a loopback development server.
-	server.LocalBrowser = mode == "local" && server.RemoteBrowser == nil && env("HOST", "127.0.0.1") == "127.0.0.1"
+	server.LocalBrowser = cfg.Mode == "local" && env("HOST", "127.0.0.1") == "127.0.0.1"
+	server.BrowserMode = cfg.Mode
+	server.ConfigVersion = cfg.Version
+	server.Lifetime = ctx
+	server.PrepareBrowser = func(next shopeeconfig.Config) (func(), error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		// Gate/rate changes retain the authenticated browser. Chrome connection changes
+		// wait for current API operations, close owned tabs and keep the disk profile.
+		same := next.Mode == cfg.Mode && next.ExecutablePath == cfg.ExecutablePath && next.ProfilePath == cfg.ProfilePath && next.RemoteURL == cfg.RemoteURL
+		if same {
+			return func() { runtimeMu.Lock(); defer runtimeMu.Unlock(); cfg = next }, nil
+		}
+		replacement, err := next.NewBrowser()
+		if err != nil {
+			return nil, err
+		}
+		return func() {
+			runtimeMu.Lock()
+			defer runtimeMu.Unlock()
+			browserStop()
+			<-browserDone
+			browserCtx, browserStop = context.WithCancel(ctx)
+			browserDone = make(chan struct{})
+			currentCtx, currentDone := browserCtx, browserDone
+			go func() { replacement.Run(currentCtx); close(currentDone) }()
+			aff.Browser = replacement
+			cfg = next
+			server.BrowserMode = next.Mode
+			server.LocalBrowser = next.Mode == "local" && env("HOST", "127.0.0.1") == "127.0.0.1"
+		}, nil
+	}
 	srv := &http.Server{Addr: env("HOST", "127.0.0.1") + ":" + env("PORT", "8080"), Handler: api.New(server), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		<-ctx.Done()
 		c, close := context.WithTimeout(context.Background(), 10*time.Second)
 		defer close()
@@ -112,6 +140,7 @@ func run() error {
 	slog.Info("api_started", "address", srv.Addr)
 	e = srv.ListenAndServe()
 	if e == http.ErrServerClosed {
+		<-shutdownDone
 		return nil
 	}
 	return e

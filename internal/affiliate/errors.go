@@ -3,9 +3,26 @@ package affiliate
 import (
 	"context"
 	"errors"
+	"net"
+	"net/url"
 
 	"hoanxu/internal/platform"
 )
+
+func resolveError(err error) error {
+	if errors.Is(err, errNotProduct) {
+		return platform.Fail(422, "NOT_PRODUCT_LINK", errNotProduct.Error())
+	}
+	var network net.Error
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || (errors.As(err, &network) && network.Timeout()) {
+		return platform.Fail(504, "SHOPEE_TIMEOUT", "Tải sản phẩm lâu hơn dự kiến. Bạn thử lại nhé.")
+	}
+	var request *url.Error
+	if errors.Is(err, errResolveFailed) || errors.As(err, &request) {
+		return platform.Fail(502, "URL_RESOLVE_FAILED", errResolveFailed.Error())
+	}
+	return platform.Fail(422, "INVALID_URL", err.Error())
+}
 
 // Only stable codes and actionable messages cross the public API boundary.
 func checkError(err error) error {
