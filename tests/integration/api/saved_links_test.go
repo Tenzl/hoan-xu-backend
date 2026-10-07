@@ -27,7 +27,7 @@ func savedFixture(t *testing.T, s *platform.Store, user string, created time.Tim
 	if e := s.Pool.QueryRow(ctx, `SELECT tracking_code FROM users WHERE id=$1`, user).Scan(&customer); e != nil {
 		t.Fatal(e)
 	}
-	if e := s.Pool.QueryRow(ctx, `SELECT id::text,tracking_version FROM cashback_policies WHERE mode='tiered' ORDER BY created_at DESC,id DESC LIMIT 1`).Scan(&policy, &version); e != nil {
+	if e := s.Pool.QueryRow(ctx, `SELECT id::text,tracking_version FROM cashback_policies WHERE mode='tiered' AND EXISTS(SELECT 1 FROM cashback_tiers t WHERE t.policy_id=cashback_policies.id AND t.tier_code='bronze') ORDER BY created_at DESC,id DESC LIMIT 1`).Scan(&policy, &version); e != nil {
 		t.Fatal(e)
 	}
 	claims := tracking.Claims{CreatedAt: created, Shop: 83496725, Item: 6939920023, Policy: version, Tier: "bronze", Bps: 6600}
@@ -220,7 +220,9 @@ func TestDeletionIsDeniedDuringConcurrentImport(t *testing.T) {
 	go func() { result <- (&affiliate.Service{Store: s}).DeleteLink(ctx, user, id) }()
 	select {
 	case err := <-result:
-		if err == nil { t.Fatal("deletion was allowed") }
+		if err == nil {
+			t.Fatal("deletion was allowed")
+		}
 	case <-time.After(time.Second):
 		t.Fatal("disabled deletion should not wait for the import")
 	}
@@ -230,7 +232,7 @@ func TestDeletionIsDeniedDuringConcurrentImport(t *testing.T) {
 	if e = tx.Commit(ctx); e != nil {
 		t.Fatal(e)
 	}
-	if got := linkState(t,s,id); got["status"] != "progress" || got["canDelete"] != false {
-		t.Fatal("import should retain the link",got)
+	if got := linkState(t, s, id); got["status"] != "progress" || got["canDelete"] != false {
+		t.Fatal("import should retain the link", got)
 	}
 }

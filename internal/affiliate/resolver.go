@@ -22,7 +22,7 @@ func ValidateURL(raw string) (*url.URL, error) {
 		return nil, errors.New("Link phải là HTTPS Shopee, không có userinfo/port")
 	}
 	switch u.Hostname() {
-	case "shopee.vn", "www.shopee.vn", "s.shopee.vn", "affiliate.shopee.vn":
+	case "shopee.vn", "www.shopee.vn", "s.shopee.vn", "affiliate.shopee.vn", "vn.shp.ee":
 	default:
 		return nil, errors.New("Domain không được hỗ trợ")
 	}

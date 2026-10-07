@@ -38,7 +38,7 @@ func (c Claims) Eligible(at time.Time) bool {
 
 var factorFormat = regexp.MustCompile(`^(0\.[0-9]{2}|1\.00)$`)
 var factorSubIDFormat = regexp.MustCompile(`^(0p[0-9]{2}|1p00)$`)
-var tiers = []string{"bronze", "platinum", "diamond"}
+var tiers = []string{"bronze", "platinum", "diamond", "member", "silver", "gold"}
 
 // MatchesFactor compares the Shopee-safe carrier with the decimal policy factor.
 // The HMAC authenticates the exact carrier (e.g. 0p63), never a normalized input.

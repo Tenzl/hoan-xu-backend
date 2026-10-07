@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"hoanxu/internal/platform"
+	"hoanxu/internal/wallet"
 )
 
 // Apply commits the entire historical batch, including balanced order credits, atomically.
@@ -74,6 +75,7 @@ func (p *Plan) Apply(ctx context.Context, pool *pgxpool.Pool) (Summary, error) {
 	}{
 		{`INSERT INTO users(id,name,email,role,tracking_code,created_at) SELECT id,name,'','customer','legacy_'||replace(id::text,'-',''),created_at FROM legacy_import_customers`, nil},
 		{`INSERT INTO wallet_accounts(user_id,kind) SELECT c.id,k.kind FROM legacy_import_customers c CROSS JOIN (VALUES ('available'),('held'),('debt'),('gift_held')) k(kind)`, nil},
+		{`INSERT INTO wallet_accounts(user_id,kind) SELECT c.id,k.kind FROM legacy_import_customers c CROSS JOIN (VALUES ('green_available'),('green_gift_held')) k(kind) WHERE to_regclass('xu_exchange_policies') IS NOT NULL`, nil},
 		{`INSERT INTO coin_accounts(user_id) SELECT id FROM legacy_import_customers`, nil},
 		{`INSERT INTO affiliate_links(id,user_id,channel,original_url,affiliate_url,tracking_code,policy_id,min_share_bps,max_share_bps,created_at)
 		 SELECT link_id,user_id,'shopee','link','link',tracking,$1,10000,10000,ordered_at FROM legacy_import_orders`, []any{policy}},
@@ -95,6 +97,13 @@ func (p *Plan) Apply(ctx context.Context, pool *pgxpool.Pool) (Summary, error) {
 		if _, err = tx.Exec(ctx, step.sql, step.args...); err != nil {
 			return Summary{}, err
 		}
+	}
+	ids := make([]string, 0, len(p.customers))
+	for _, c := range p.customers {
+		ids = append(ids, c.id)
+	}
+	if err = wallet.RefreshGoldTotals(ctx, tx, ids...); err != nil {
+		return Summary{}, err
 	}
 	var invalid int
 	if err = tx.QueryRow(ctx, `SELECT count(*) FROM wallet_accounts a JOIN legacy_import_customers c ON c.id=a.user_id WHERE a.balance<>coalesce((SELECT sum(e.amount) FROM wallet_entries e WHERE e.account_id=a.id),0)`).Scan(&invalid); err != nil {

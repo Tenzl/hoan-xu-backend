@@ -279,7 +279,7 @@ func (s *Service) createLink(ctx context.Context, user, raw string, complete fun
 	if e != nil {
 		return nil, e
 	}
-	result := map[string]any{"id": id, "status": "active", "canDelete": false, "legacy": false, "affiliateUrl": shortURL, "trackingCode": ids[2], "channel": "shopee", "policyId": m.PolicyID, "tierCode": m.Code, "minSharePercent": m.Public().Min, "maxSharePercent": m.Public().Max, "effectiveSharePercent": cashback.Percent(rate.EffectiveBps), "payoutFactor": rate.Factor(), "createdAt": created, "expiresAt": claims.ExpiresAt()}
+	result := map[string]any{"id": id, "status": "active", "canDelete": false, "legacy": false, "affiliateUrl": shortURL, "trackingCode": ids[2], "channel": "shopee", "policyId": m.PolicyID, "tierCode": m.Code, "tierNameVi": m.NameVI, "tierNameEn": m.NameEN, "minSharePercent": m.Public().Min, "maxSharePercent": m.Public().Max, "effectiveSharePercent": cashback.Percent(rate.EffectiveBps), "payoutFactor": rate.Factor(), "createdAt": created, "expiresAt": claims.ExpiresAt()}
 	result["productName"] = product.Name
 	if complete != nil {
 		if e = complete(save, id, result); e != nil {

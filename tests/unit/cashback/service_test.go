@@ -32,24 +32,26 @@ func TestPercentAndAmount(t *testing.T) {
 	}
 }
 func TestTierBoundaries(t *testing.T) {
-	p := &Policy{ID: "test", Tiers: []Tier{{"bronze", 0, 5000, 5000}, {"platinum", 30, 6000, 7000}, {"diamond", 100, 7000, 8000}}}
+	p := &Policy{ID: "test", Tiers: []Tier{{Code:"bronze",MinGold:0,Min:5000,Max:5000}, {Code:"platinum",MinGold:30,Min:6000,Max:7000}, {Code:"diamond",MinGold:100,Min:7000,Max:8000}}}
 	for _, tc := range []struct {
 		n         int64
 		code      string
 		remaining int64
 	}{{0, "bronze", 30}, {29, "bronze", 1}, {30, "platinum", 70}, {99, "platinum", 1}, {100, "diamond", 0}, {101, "diamond", 0}} {
 		m := Select(p, tc.n)
-		if m.Code != tc.code || m.OrdersToNext != tc.remaining {
+		if m.Code != tc.code || m.GoldToNext != tc.remaining {
 			t.Fatal(m)
 		}
 	}
 }
 func TestPolicyValidationAndRequiredFields(t *testing.T) {
-	valid := Input{CurrentVersionID: "11111111-1111-4111-8111-111111111111", Tax: 500, Tiers: []Tier{{"bronze", 0, 0, 10000}, {"platinum", 30, 5000, 5500}, {"diamond", 100, 8000, 9000}}}
+	valid := Input{CurrentVersionID: "11111111-1111-4111-8111-111111111111", Tax: 500, Tiers: []Tier{{Code:"bronze",MinGold:0,Min:0,Max:10000}, {Code:"platinum",MinGold:30,Min:5000,Max:5500}, {Code:"diamond",MinGold:100,Min:8000,Max:9000}}}
+	valid=periodInputForUnit(valid)
 	if e := Validate(valid); e != nil {
 		t.Fatal(e)
 	}
-	for _, change := range []func(*Input){func(p *Input) { p.Tiers[0].MinOrders = 1 }, func(p *Input) { p.Tiers[1].MinOrders = 100 }, func(p *Input) { p.Tiers[2].Min = 9500 }, func(p *Input) { p.Tiers[1].Code = "silver" }, func(p *Input) { p.Tiers[0].Max = 10001 }, func(p *Input) { p.Tiers = p.Tiers[:2] }} {
+	valid=periodInputForUnit(valid)
+	for _, change := range []func(*Input){func(p *Input) { p.Tiers[0].MinGold = 1 }, func(p *Input) { p.Tiers[1].MinGold = 100 }, func(p *Input) { p.Tiers[2].Min = 9500 }, func(p *Input) { p.Tiers[1].Code = "invalid" }, func(p *Input) { p.Tiers[0].Max = 10001 }, func(p *Input) { p.Tiers = p.Tiers[:2] }} {
 		p := valid
 		p.Tiers = append([]Tier(nil), valid.Tiers...)
 		change(&p)

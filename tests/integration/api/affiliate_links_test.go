@@ -34,7 +34,7 @@ func TestCreatedLinkHistoryWithoutSaving(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, owner := range []string{customer, customer, customer, other} {
-		_, err = store.Pool.Exec(ctx, `INSERT INTO affiliate_links(user_id,channel,original_url,affiliate_url,tracking_code,policy_id,tier_code,min_share_bps,max_share_bps,created_at) SELECT $1,'shopee','https://shopee.vn/product/1/2','https://s.shopee.vn/test',$2,id,'bronze',2222,2224,'2026-10-05T00:00:00Z' FROM cashback_policies WHERE mode='tiered'`, owner, fmt.Sprintf("history-%d", i))
+		_, err = store.Pool.Exec(ctx, `INSERT INTO affiliate_links(user_id,channel,original_url,affiliate_url,tracking_code,policy_id,tier_code,min_share_bps,max_share_bps,created_at) SELECT $1,'shopee','https://shopee.vn/product/1/2','https://s.shopee.vn/test',$2,id,'bronze',2222,2224,'2026-10-05T00:00:00Z' FROM cashback_policies WHERE mode='tiered' ORDER BY created_at DESC,id DESC LIMIT 1`, owner, fmt.Sprintf("history-%d", i))
 		if err != nil {
 			t.Fatal(err)
 		}

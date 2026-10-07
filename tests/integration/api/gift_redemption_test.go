@@ -24,7 +24,7 @@ func TestGiftPriceChangeDoesNotChargeCustomer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	if err = wallet.Credit(ctx, tx, customer, "gift-price-fund", "Test", 30000); err != nil {
+	if err = wallet.CreditGreen(ctx, tx, customer, "gift-price-fund", "Test", 30000); err != nil {
 		t.Fatal(err)
 	}
 	token, err := a.NewSession(ctx, tx, customer)
@@ -54,7 +54,7 @@ func TestGiftPriceChangeDoesNotChargeCustomer(t *testing.T) {
 	}
 	var available, held int64
 	var stock, count int
-	err = s.Pool.QueryRow(ctx, `SELECT (SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'),(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='gift_held'),(SELECT stock FROM gift_catalog WHERE id='g1'),(SELECT count(*) FROM gift_redemptions WHERE user_id=$1)`, customer).Scan(&available, &held, &stock, &count)
+	err = s.Pool.QueryRow(ctx, `SELECT (SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='green_available'),(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='green_gift_held'),(SELECT stock FROM gift_catalog WHERE id='g1'),(SELECT count(*) FROM gift_redemptions WHERE user_id=$1)`, customer).Scan(&available, &held, &stock, &count)
 	if err != nil || available != 30000 || held != 0 || stock != 1 || count != 0 {
 		t.Fatal(available, held, stock, count, err)
 	}
@@ -88,7 +88,7 @@ func TestGiftConcurrentRetriesHoldXuOnlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	if err = wallet.Credit(ctx, tx, customer, "gift-retry-fund", "Test", 30000); err != nil {
+	if err = wallet.CreditGreen(ctx, tx, customer, "gift-retry-fund", "Test", 30000); err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -145,7 +145,7 @@ func TestGiftConcurrentRetriesHoldXuOnlyOnce(t *testing.T) {
 	}
 	var available, held int64
 	var stock, count int
-	err = s.Pool.QueryRow(ctx, `SELECT (SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'),(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='gift_held'),(SELECT stock FROM gift_catalog WHERE id='g1'),(SELECT count(*) FROM gift_redemptions WHERE user_id=$1)`, customer).Scan(&available, &held, &stock, &count)
+	err = s.Pool.QueryRow(ctx, `SELECT (SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='green_available'),(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='green_gift_held'),(SELECT stock FROM gift_catalog WHERE id='g1'),(SELECT count(*) FROM gift_redemptions WHERE user_id=$1)`, customer).Scan(&available, &held, &stock, &count)
 	if err != nil || available != 19500 || held != 10500 || stock != 1 || count != 1 {
 		t.Fatal(available, held, stock, count, err)
 	}
@@ -160,7 +160,7 @@ func TestGiftIssuedCodeIsEncryptedAndVisibleOnlyToOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	if err = wallet.Credit(ctx, tx, customer, "gift-code-fund", "Test", 30000); err != nil {
+	if err = wallet.CreditGreen(ctx, tx, customer, "gift-code-fund", "Test", 30000); err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -184,7 +184,7 @@ func TestGiftIssuedCodeIsEncryptedAndVisibleOnlyToOwner(t *testing.T) {
 	var cipher string
 	var held int64
 	var notifications int
-	err = s.Pool.QueryRow(ctx, `SELECT voucher_cipher,(SELECT balance FROM wallet_accounts WHERE user_id=$2 AND kind='gift_held'),(SELECT count(*) FROM notifications WHERE recipient_id=$2 AND title='Voucher đã sẵn sàng') FROM gift_redemptions WHERE id=$1`, id, customer).Scan(&cipher, &held, &notifications)
+	err = s.Pool.QueryRow(ctx, `SELECT voucher_cipher,(SELECT balance FROM wallet_accounts WHERE user_id=$2 AND kind='green_gift_held'),(SELECT count(*) FROM notifications WHERE recipient_id=$2 AND title='Voucher đã sẵn sàng') FROM gift_redemptions WHERE id=$1`, id, customer).Scan(&cipher, &held, &notifications)
 	if err != nil || strings.Contains(cipher, "SHOPEE-VOUCHER-SECRET") || held != 0 || notifications != 1 {
 		t.Fatal("issuance state", held, notifications, err)
 	}

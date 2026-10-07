@@ -6,6 +6,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"hoanxu/internal/platform"
 	"regexp"
+	"sort"
+	"strings"
 )
 
 type Service struct{ Store *platform.Store }
@@ -17,11 +19,11 @@ type Entry struct {
 
 // Post locks accounts in a consistent order and updates balances with immutable entries.
 func Post(ctx context.Context, tx pgx.Tx, reference, description string, entries []Entry) error {
-	var sum int64
+	sums := map[bool]int64{}
 	for _, v := range entries {
-		sum += v.Amount
+		sums[strings.HasPrefix(v.Kind, "green_")] += v.Amount
 	}
-	if sum != 0 {
+	if sums[false] != 0 || sums[true] != 0 {
 		return platform.Fail(500, "LEDGER_UNBALANCED", "Giao dịch không cân bằng.")
 	}
 	var tid string
@@ -34,17 +36,31 @@ func Post(ctx context.Context, tx pgx.Tx, reference, description string, entries
 	if e = tx.QueryRow(ctx, `SELECT id::text FROM wallet_accounts WHERE kind='system' FOR UPDATE`).Scan(&system); e != nil {
 		return e
 	}
+	var greenSystem string
+	for _, v := range entries {
+		if strings.HasPrefix(v.Kind, "green_") {
+			if e = tx.QueryRow(ctx, `SELECT id::text FROM wallet_accounts WHERE kind='green_system' FOR UPDATE`).Scan(&greenSystem); e != nil {
+				return e
+			}
+			break
+		}
+	}
+	entries = append([]Entry(nil), entries...)
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].User+":"+entries[i].Kind < entries[j].User+":"+entries[j].Kind })
 	for _, v := range entries {
 		if v.Amount == 0 {
 			continue
 		}
 		id := system
-		if v.Kind != "system" {
+		if v.Kind == "green_system" {
+			id = greenSystem
+		}
+		if v.Kind != "system" && v.Kind != "green_system" {
 			if e = tx.QueryRow(ctx, `SELECT id::text FROM wallet_accounts WHERE user_id=$1 AND kind=$2 FOR UPDATE`, v.User, v.Kind).Scan(&id); e != nil {
 				return e
 			}
 		}
-		tag, e := tx.Exec(ctx, `UPDATE wallet_accounts SET balance=balance+$2 WHERE id=$1 AND (kind='system' OR balance+$2>=0)`, id, v.Amount)
+		tag, e := tx.Exec(ctx, `UPDATE wallet_accounts SET balance=balance+$2 WHERE id=$1 AND (kind IN ('system','green_system') OR balance+$2>=0)`, id, v.Amount)
 		if e != nil {
 			return e
 		}
@@ -180,6 +196,11 @@ func (s *Service) Process(ctx context.Context, actor, id, key string, p Event) (
 		_, e = tx.Exec(ctx, `UPDATE withdrawals SET status=$2,processor_id=$3,reason=$4,bank_reference=nullif($5,''),evidence_path=nullif($6,'') WHERE id=$1`, id, next, actor, p.Reason, p.BankReference, p.Evidence)
 		if e != nil {
 			return nil, platform.Conflict(e)
+		}
+		if next == "paid" {
+			if e = RefreshGoldTotals(ctx, tx, user); e != nil {
+				return nil, e
+			}
 		}
 		e = platform.Audit(ctx, tx, actor, "withdraw_"+next, id, p)
 		return map[string]string{"id": id, "status": next}, e

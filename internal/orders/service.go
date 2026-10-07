@@ -13,12 +13,14 @@ import (
 
 type Service struct{ Store *platform.Store }
 type Event struct {
-	Action     string `json:"action"`
-	Reason     string `json:"reason"`
-	Commission int64  `json:"commission"`
+	Action string `json:"action"`
+	Reason string `json:"reason"`
 }
 
 func (s *Service) Event(ctx context.Context, actor, id, key string, p Event) (any, error) {
+	if p.Action != "approved" && p.Action != "rejected" && p.Action != "reopened" {
+		return nil, platform.Fail(422, "INVALID_ACTION", "Thao tác không hợp lệ.")
+	}
 	return s.Store.Action(ctx, actor, key, "order-event:"+id, p, func(tx pgx.Tx) (any, error) {
 		var lockUser, lockCode string
 		if err := tx.QueryRow(ctx, `SELECT user_id::text,coalesce(tracking_code,'') FROM orders WHERE id=$1`, id).Scan(&lockUser, &lockCode); err != nil {
@@ -96,37 +98,6 @@ func (s *Service) Event(ctx context.Context, actor, id, key string, p Event) (an
 			}
 			cash, e = cashback.OrderAmount(commission, bps, mode)
 			next, internalRejection = "pending", false
-		case "adjustment":
-			if status != "approved" || p.Commission < 0 || p.Commission > 1e12 || !platform.Text(p.Reason, 3, 500) {
-				return nil, platform.Fail(422, "INVALID_ADJUSTMENT", "Điều chỉnh cần đơn đã duyệt, số hoa hồng hợp lệ và lý do.")
-			}
-			newCash, err := cashback.OrderAmount(p.Commission, bps, mode)
-			if err != nil {
-				return nil, err
-			}
-			if mode == "signed_link" && sourceStatus == "rejected" {
-				newCash = 0
-			}
-			delta := newCash - cash
-			if delta > 0 {
-				e = wallet.Credit(ctx, tx, user, "order_adjust:"+id+":"+key, "Điều chỉnh hoàn tiền", delta)
-			} else if delta < 0 {
-				if _, e = tx.Exec(ctx, `SELECT id FROM wallet_accounts WHERE kind='system' FOR UPDATE`); e != nil {
-					return nil, e
-				}
-				var available int64
-				if e = tx.QueryRow(ctx, `SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available' FOR UPDATE`, user).Scan(&available); e != nil {
-					return nil, e
-				}
-				take := min(available, -delta)
-				debt := -delta - take
-				entries := []wallet.Entry{{User: user, Kind: "available", Amount: -take}, {Kind: "system", Amount: take}}
-				if debt > 0 {
-					entries = append(entries, wallet.Entry{User: user, Kind: "debt", Amount: debt}, wallet.Entry{Kind: "system", Amount: -debt})
-				}
-				e = wallet.Post(ctx, tx, "order_adjust:"+id+":"+key, "Điều chỉnh hoàn tiền", entries)
-			}
-			cash, commission = newCash, p.Commission
 		default:
 			return nil, platform.Fail(422, "INVALID_ACTION", "Thao tác không hợp lệ.")
 		}
@@ -135,6 +106,9 @@ func (s *Service) Event(ctx context.Context, actor, id, key string, p Event) (an
 		}
 		_, e = tx.Exec(ctx, `UPDATE orders SET status=$2,cashback=$3,commission=$4,internally_rejected=$5,approved_at=CASE WHEN $2='approved' THEN coalesce(approved_at,now()) ELSE approved_at END WHERE id=$1`, id, next, cash, commission, internalRejection)
 		if e != nil {
+			return nil, e
+		}
+		if e = wallet.RefreshGoldTotals(ctx, tx, user); e != nil {
 			return nil, e
 		}
 		_, e = tx.Exec(ctx, `INSERT INTO order_events(order_id,actor_id,action,reason,payload) VALUES($1,$2,$3,$4,jsonb_build_object('commission',$5::bigint,'cashback',$6::bigint,'shareBps',$7::integer))`, id, actor, p.Action, p.Reason, commission, cash, bps)

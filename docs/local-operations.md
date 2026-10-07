@@ -8,13 +8,13 @@ Tự tạo admin bằng `scripts/create-admin.ps1`. Mật khẩu nhập qua prom
 
 ## Đối soát
 
-Chính sách ba hạng được quản lý riêng tại `/admin/settings`: Đồng/Bạch kim/Kim cương, ngưỡng số đơn đã duyệt và khoảng % chia trên hoa hồng thực nhận. Lưu tạo phiên bản bất biến; nếu có thông báo xung đột phiên bản, tải lại và kiểm tra cấu hình mới trước khi sửa tiếp. Link mới chụp phiên bản/hạng/khoảng, nên khách lên hạng sau đó không đổi link đã tạo. CSV và nhập tay chọn tỷ lệ một lần cho mỗi khóa đơn/dòng nguồn; đối soát lại hoặc điều chỉnh giữ tỷ lệ đó. Không nhập tỷ lệ ngẫu nhiên trực tiếp hoặc chỉnh số dư bằng SQL.
+Chính sách bốn hạng theo kỳ được quản lý tại `/admin/settings`: tên, ngưỡng hoàn vàng, thưởng đổi Xu, tỷ lệ mua hàng, thuế và lịch kỳ đều chỉnh được. Mặc định Thân thiết/Bạc/Vàng/Kim cương: 0/500.000/1.500.000/3.000.000 Xu, thưởng 3/6/10/15%. Lưu tạo phiên bản bất biến; hạng khách tính lại ngay, link/giao dịch đã chốt giữ snapshot. Xem [cashback-tiers.md](cashback-tiers.md) cho lên/giữ/xuống hạng và triển khai 29–30.
 
 1. Xuất báo cáo hoa hồng từ publisher thực, chuẩn bị CSV UTF-8 theo file mẫu. Tiền là số nguyên VND; giữ channel/publisher/order/line riêng.
 2. Upload tại Nhập báo cáo CSV, cấu hình mapping nếu tên cột khác. Kiểm tra valid/invalid/unmatched trước commit.
 3. Dòng invalid cần sửa file. Dòng unmatched chỉ khớp tracking có bằng chứng; không gán ngẫu nhiên khách.
 4. Commit và theo dõi batch. Worker lưu tiến độ, lease hết hạn được nhận lại sau restart. Đơn nguồn pending chưa được cộng tiền.
-5. Nguồn approved mới có thể duyệt nội bộ. Duyệt và ghi ví là một transaction. Báo cáo đổi sau duyệt tạo dòng adjustment để quản trị xem, rồi điều chỉnh với lý do.
+5. Nguồn approved mới có thể duyệt nội bộ. Duyệt và ghi ví là một transaction. Báo cáo đổi sau duyệt bị bỏ qua kèm lý do; không điều chỉnh đơn hoặc ví đã chốt.
 
 ## Chi trả và voucher
 

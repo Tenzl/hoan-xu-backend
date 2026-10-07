@@ -243,7 +243,7 @@ func testStoreWithTiers(t *testing.T, tiers bool) (*platform.Store, string, stri
 	}
 	for _, path := range files {
 		name := filepath.Base(path)
-		if !tiers && (name == "000008_cashback_tiers.up.sql" || name == "000009_unified_wallet.up.sql") {
+		if !tiers && (name == "000008_cashback_tiers.up.sql" || name == "000009_unified_wallet.up.sql" || name == "000024_dual_xu.up.sql" || name == "000025_dual_xu_seed.up.sql" || name == "000029_period_membership.up.sql" || name == "000030_period_membership_seed.up.sql") {
 			continue
 		}
 		raw, e := os.ReadFile(path)
@@ -369,7 +369,7 @@ func TestCheckinAndExchange(t *testing.T) {
 		t.Fatal("exchange enabled by default")
 	}
 	var balance int64
-	if e := s.Pool.QueryRow(ctx, `SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'`, uid).Scan(&balance); e != nil || balance != 300 {
+	if e := s.Pool.QueryRow(ctx, `SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='green_available'`, uid).Scan(&balance); e != nil || balance != 300 {
 		t.Fatal(balance, e)
 	}
 	if _, e := r.Exchange(ctx, uid, "exchange-test", 20); e == nil {
@@ -384,7 +384,7 @@ func TestGiftStockAndRefund(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if e = wallet.Credit(ctx, tx, uid, "gift-test-coins", "Test", 30000); e != nil {
+	if e = wallet.CreditGreen(ctx, tx, uid, "gift-test-coins", "Test", 30000); e != nil {
 		t.Fatal(e)
 	}
 	if e = tx.Commit(ctx); e != nil {
@@ -418,7 +418,7 @@ func TestGiftStockAndRefund(t *testing.T) {
 		t.Fatal("second refund accepted")
 	}
 	var balance int64
-	e = s.Pool.QueryRow(ctx, `SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'`, uid).Scan(&balance)
+	e = s.Pool.QueryRow(ctx, `SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='green_available'`, uid).Scan(&balance)
 	if e != nil || balance != 30000 {
 		t.Fatal(balance, e)
 	}

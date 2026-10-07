@@ -23,14 +23,17 @@ func (q *Queries) ApprovedOrderCount(ctx context.Context, userID pgtype.UUID) (i
 }
 
 const cashbackTiers = `-- name: CashbackTiers :many
-SELECT tier_code,min_approved_orders,min_share_bps,max_share_bps FROM cashback_tiers WHERE policy_id=$1 ORDER BY min_approved_orders
+SELECT tier_code,coalesce(name_vi,'')::text AS name_vi,coalesce(name_en,'')::text AS name_en,coalesce(min_gold_total,0)::bigint AS min_gold_total,coalesce(exchange_bonus_percent,0)::integer AS exchange_bonus_percent,min_share_bps,max_share_bps FROM cashback_tiers WHERE policy_id=$1 ORDER BY min_gold_total NULLS FIRST,min_approved_orders
 `
 
 type CashbackTiersRow struct {
-	TierCode          string
-	MinApprovedOrders int64
-	MinShareBps       int32
-	MaxShareBps       int32
+	TierCode             string
+	NameVi               string
+	NameEn               string
+	MinGoldTotal         int64
+	ExchangeBonusPercent int32
+	MinShareBps          int32
+	MaxShareBps          int32
 }
 
 func (q *Queries) CashbackTiers(ctx context.Context, policyID pgtype.UUID) ([]CashbackTiersRow, error) {
@@ -44,7 +47,10 @@ func (q *Queries) CashbackTiers(ctx context.Context, policyID pgtype.UUID) ([]Ca
 		var i CashbackTiersRow
 		if err := rows.Scan(
 			&i.TierCode,
-			&i.MinApprovedOrders,
+			&i.NameVi,
+			&i.NameEn,
+			&i.MinGoldTotal,
+			&i.ExchangeBonusPercent,
 			&i.MinShareBps,
 			&i.MaxShareBps,
 		); err != nil {
@@ -59,18 +65,79 @@ func (q *Queries) CashbackTiers(ctx context.Context, policyID pgtype.UUID) ([]Ca
 }
 
 const currentCashbackPolicy = `-- name: CurrentCashbackPolicy :one
-SELECT id::text,created_at,tax_bps FROM cashback_policies WHERE mode='tiered' ORDER BY created_at DESC,id DESC LIMIT 1
+SELECT id::text,created_at,tax_bps,period_months,anchor_date,date_basis FROM cashback_policies WHERE mode='tiered' ORDER BY created_at DESC,id DESC LIMIT 1
 `
 
 type CurrentCashbackPolicyRow struct {
-	ID        string
-	CreatedAt pgtype.Timestamptz
-	TaxBps    int32
+	ID           string
+	CreatedAt    pgtype.Timestamptz
+	TaxBps       int32
+	PeriodMonths int32
+	AnchorDate   pgtype.Date
+	DateBasis    string
 }
 
 func (q *Queries) CurrentCashbackPolicy(ctx context.Context) (CurrentCashbackPolicyRow, error) {
 	row := q.db.QueryRow(ctx, currentCashbackPolicy)
 	var i CurrentCashbackPolicyRow
-	err := row.Scan(&i.ID, &i.CreatedAt, &i.TaxBps)
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.TaxBps,
+		&i.PeriodMonths,
+		&i.AnchorDate,
+		&i.DateBasis,
+	)
+	return i, err
+}
+
+const membershipTime = `-- name: MembershipTime :one
+SELECT transaction_timestamp()::timestamptz
+`
+
+func (q *Queries) MembershipTime(ctx context.Context) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, membershipTime)
+	var column_1 pgtype.Timestamptz
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const periodCashbackTotals = `-- name: PeriodCashbackTotals :one
+WITH eligible AS (
+ SELECT cashback,CASE WHEN $6::text='ordered' THEN ordered_at ELSE approved_at END AS at
+ FROM orders o WHERE o.user_id=$5 AND status='approved' AND approved_at<=$4::timestamptz
+)
+SELECT coalesce(sum(cashback) FILTER(WHERE at>=$1::timestamptz AND at<$2::timestamptz),0)::bigint AS previous_total,
+ coalesce(sum(cashback) FILTER(WHERE at>=$2::timestamptz AND at<$3::timestamptz AND at<=$4::timestamptz),0)::bigint AS current_total,
+ (SELECT count(*) FROM orders o WHERE o.user_id=$5 AND status='approved' AND approved_at<=$4::timestamptz)::bigint AS approved_orders
+FROM eligible WHERE at>=$1::timestamptz AND at<$3::timestamptz
+`
+
+type PeriodCashbackTotalsParams struct {
+	PreviousStart pgtype.Timestamptz
+	CurrentStart  pgtype.Timestamptz
+	CurrentEnd    pgtype.Timestamptz
+	AsOf          pgtype.Timestamptz
+	UserID        pgtype.UUID
+	DateBasis     string
+}
+
+type PeriodCashbackTotalsRow struct {
+	PreviousTotal  int64
+	CurrentTotal   int64
+	ApprovedOrders int64
+}
+
+func (q *Queries) PeriodCashbackTotals(ctx context.Context, arg PeriodCashbackTotalsParams) (PeriodCashbackTotalsRow, error) {
+	row := q.db.QueryRow(ctx, periodCashbackTotals,
+		arg.PreviousStart,
+		arg.CurrentStart,
+		arg.CurrentEnd,
+		arg.AsOf,
+		arg.UserID,
+		arg.DateBasis,
+	)
+	var i PeriodCashbackTotalsRow
+	err := row.Scan(&i.PreviousTotal, &i.CurrentTotal, &i.ApprovedOrders)
 	return i, err
 }

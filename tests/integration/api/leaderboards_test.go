@@ -189,7 +189,7 @@ func containsJSONKey(text, key string) bool {
 	return search(v)
 }
 
-func TestApprovalTimeAtomicAndAdjustmentPreservesIt(t *testing.T) {
+func TestApprovalTimeAtomicAndAdjustmentIsRejected(t *testing.T) {
 	s, uid, admin := testStore(t)
 	ctx := context.Background()
 	var id string
@@ -217,7 +217,7 @@ func TestApprovalTimeAtomicAndAdjustmentPreservesIt(t *testing.T) {
 	if err = s.Pool.QueryRow(ctx, `SELECT approved_at,(SELECT count(*) FROM wallet_transactions WHERE reference='order_credit:'||orders.id::text) FROM orders WHERE id=$1`, id).Scan(&first, &credits); err != nil || credits != 1 {
 		t.Fatal(credits, err)
 	}
-	if _, err = svc.Event(ctx, admin, id, platform.Token(), orders.Event{Action: "adjustment", Commission: 3000, Reason: "Correct the statement"}); err != nil {
+	if _, err = svc.Event(ctx, admin, id, platform.Token(), orders.Event{Action: "adjustment", Reason: "Correct the statement"}); err == nil {
 		t.Fatal(err)
 	}
 	var after time.Time

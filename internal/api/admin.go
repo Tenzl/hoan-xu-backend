@@ -26,6 +26,8 @@ import (
 )
 
 func (s *Server) adminRoutes(r chi.Router) {
+	s.adminOperationRoutes(r)
+	s.weeklyPrizeRoutes(r)
 	r.Post("/admin/browser/verifications", s.allowed("settings", true, s.startShopeeVerification))
 	r.Get("/admin/browser/verifications/{id}", s.allowed("settings", false, s.getShopeeVerification))
 	r.Get("/admin/browser/settings", s.allowed("settings", false, s.getShopeeSettings))
@@ -42,13 +44,37 @@ func (s *Server) adminRoutes(r chi.Router) {
 		v, e := (&cashback.Service{Store: s.Store}).Create(r.Context(), user(r).ID, r.Header.Get("Idempotency-Key"), p)
 		s.reply(w, r, 201, v, e)
 	}))
+	r.Get("/admin/xu-exchange-policies/current", s.allowed("settings", false, func(w http.ResponseWriter, r *http.Request) {
+		v, e := (&wallet.Service{Store: s.Store}).CurrentExchangePolicy(r.Context())
+		s.reply(w, r, 200, v, e)
+	}))
+	r.Post("/admin/xu-exchange-policies", s.allowed("settings", true, func(w http.ResponseWriter, r *http.Request) {
+		var p wallet.ExchangePolicyInput
+		if !s.body(w, r, &p) {
+			return
+		}
+		v, e := (&wallet.Service{Store: s.Store}).SetExchangePolicy(r.Context(), user(r).ID, r.Header.Get("Idempotency-Key"), p)
+		s.reply(w, r, 201, v, e)
+	}))
 	r.Get("/admin/dashboard", s.allowed("audit", false, func(w http.ResponseWriter, r *http.Request) {
-		s.one(w, r, `SELECT jsonb_build_object('commission',coalesce(sum(commission) FILTER(WHERE status='approved'),0),'cashback',coalesce(sum(cashback) FILTER(WHERE status='approved'),0),'retained',coalesce(sum(commission-cashback) FILTER(WHERE status='approved'),0),'pendingCommission',coalesce(sum(commission) FILTER(WHERE status='pending'),0),'pendingOrders',count(*) FILTER(WHERE status='pending'),'users',(SELECT count(*) FROM users WHERE role='customer'),'links',(SELECT count(*) FROM affiliate_links),'pendingWithdrawals',(SELECT count(*) FROM withdrawals WHERE status IN ('pending','processing')),'pendingGifts',(SELECT count(*) FROM gift_redemptions WHERE status='pending'),'paid',(SELECT coalesce(sum(amount),0) FROM withdrawals WHERE status='paid')) FROM orders`)
+		s.one(w, r, newCustomerDashboardSQL)
 	}))
 	r.Get("/admin/orders", s.allowed("orders", false, func(w http.ResponseWriter, r *http.Request) {
 		l, o := page(r)
 		st := r.URL.Query().Get("status")
-		s.list(w, r, orderSQL+` WHERE ($3='' OR o.status=$3) ORDER BY o.created_at DESC,o.id DESC LIMIT $1 OFFSET $2`, l, o, st)
+		q := r.URL.Query().Get("q")
+		if (st != "" && st != "pending" && st != "approved" && st != "rejected") || len([]rune(q)) > 100 {
+			s.reply(w, r, 0, nil, platform.Fail(422, "VALIDATION_ERROR", "Bộ lọc đơn hàng không hợp lệ."))
+			return
+		}
+		s.list(w, r, adminOrderSQL+` WHERE ($3='' OR o.status=$3) AND ($4='' OR u.name ILIKE '%'||$4||'%' OR o.external_id ILIKE '%'||$4||'%' OR o.product_name ILIKE '%'||$4||'%') ORDER BY o.created_at DESC,o.id DESC LIMIT $1 OFFSET $2`, l, o, st, q)
+	}))
+	r.Get("/admin/orders/{id}", s.allowed("orders", false, func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		if !s.customerID(w, r, id) {
+			return
+		}
+		s.one(w, r, adminOrderSQL+` WHERE o.id=$1`, id)
 	}))
 	r.Post("/admin/orders/{id}/events", s.allowed("orders", true, func(w http.ResponseWriter, r *http.Request) {
 		var p orders.Event
@@ -62,8 +88,14 @@ func (s *Server) adminRoutes(r chi.Router) {
 	r.Get("/admin/users", s.allowed("users", false, func(w http.ResponseWriter, r *http.Request) {
 		l, o := page(r)
 		q := r.URL.Query().Get("q")
-		s.list(w, r, `SELECT jsonb_build_object('id',u.id,'name',u.name,'email',u.email,'role',u.role,'blocked',u.blocked,'trackingCode',u.tracking_code,'createdAt',u.created_at,'available',coalesce((SELECT balance FROM wallet_accounts WHERE user_id=u.id AND kind='available'),0),'held',coalesce((SELECT balance FROM wallet_accounts WHERE user_id=u.id AND kind='held'),0),'giftHeld',coalesce((SELECT balance FROM wallet_accounts WHERE user_id=u.id AND kind='gift_held'),0)) FROM users u WHERE role='customer' AND ($3='' OR name ILIKE '%'||$3||'%' OR email ILIKE '%'||$3||'%') ORDER BY created_at DESC,id DESC LIMIT $1 OFFSET $2`, l, o, q)
+		kind := r.URL.Query().Get("kind")
+		if kind != "" && kind != "new" && kind != "legacy" {
+			s.reply(w, r, 0, nil, platform.Fail(422, "INVALID_CUSTOMER_KIND", "Nhóm người dùng không hợp lệ."))
+			return
+		}
+		s.list(w, r, customerSQL+` WHERE u.role='customer' AND ($3='' OR u.name ILIKE '%'||$3||'%' OR u.email ILIKE '%'||$3||'%') AND ($4='' OR `+customerKindSQL+`=$4) ORDER BY u.created_at DESC,u.id DESC LIMIT $1 OFFSET $2`, l, o, q, kind)
 	}))
+	s.customerReadRoutes(r)
 	r.Patch("/admin/users/{id}", s.allowed("users", true, func(w http.ResponseWriter, r *http.Request) {
 		var p struct {
 			Blocked bool   `json:"blocked"`
@@ -82,6 +114,10 @@ func (s *Server) adminRoutes(r chi.Router) {
 			return
 		}
 		defer tx.Rollback(r.Context())
+		if e = requireLegacyCustomer(r.Context(), tx, chi.URLParam(r, "id"), true); e != nil {
+			s.reply(w, r, 0, nil, e)
+			return
+		}
 		tag, e := tx.Exec(r.Context(), `UPDATE users SET blocked=$2 WHERE id=$1 AND role='customer'`, chi.URLParam(r, "id"), p.Blocked)
 		if e == nil && tag.RowsAffected() == 0 {
 			e = platform.Fail(404, "NOT_FOUND", "Không có khách này.")
@@ -142,36 +178,27 @@ func (s *Server) adminRoutes(r chi.Router) {
 		s.reply(w, r, 201, v, e)
 	}))
 	r.Get("/admin/gifts", s.allowed("gifts", false, func(w http.ResponseWriter, r *http.Request) {
-		s.list(w, r, `SELECT jsonb_build_object('id',id,'name',name,'channel',channel,'costXu',cost,'costUnit','xu','stock',stock,'active',active) FROM gift_catalog ORDER BY id`)
+		s.list(w, r, `SELECT jsonb_build_object('id',g.id,'name',g.name,'channel',g.channel,'costXu',g.cost,'costUnit','xu','currency','green','stock',g.stock,'active',g.active,'icon',g.icon,'imageUrl',g.image_url,'description',g.description,'pendingGoldXu',(SELECT coalesce(sum(cost_xu),0) FROM gift_redemptions WHERE gift_id=g.id AND status='pending' AND currency='gold'),'pendingGreenXu',(SELECT coalesce(sum(cost_xu),0) FROM gift_redemptions WHERE gift_id=g.id AND status='pending' AND currency='green'),'pendingCount',(SELECT count(*) FROM gift_redemptions WHERE gift_id=g.id AND status='pending'),'pendingXu',(SELECT coalesce(sum(cost_xu),0) FROM gift_redemptions WHERE gift_id=g.id AND status='pending')) FROM gift_catalog g ORDER BY g.id`)
 	}))
-	r.Patch("/admin/gifts/{id}", s.allowed("gifts", true, func(w http.ResponseWriter, r *http.Request) {
-		var p struct {
-			Name   string `json:"name"`
-			Cost   int64  `json:"costXu"`
-			Stock  int    `json:"stock"`
-			Active bool   `json:"active"`
-		}
+	r.Post("/admin/gifts", s.allowed("gifts", true, func(w http.ResponseWriter, r *http.Request) {
+		var p rewards.GiftInput
 		if !s.body(w, r, &p) {
 			return
 		}
-		if !platform.Text(p.Name, 1, 80) || p.Cost <= 0 || p.Cost > 1000000000000 || p.Stock < 0 || p.Stock > 100000 {
-			s.reply(w, r, 0, nil, platform.Fail(422, "VALIDATION_ERROR", "Danh mục quà không hợp lệ."))
+		v, e := (&rewards.Service{Store: s.Store}).CreateGift(r.Context(), user(r).ID, r.Header.Get("Idempotency-Key"), p)
+		s.reply(w, r, 201, v, e)
+	}))
+	r.Patch("/admin/gifts/{id}", s.allowed("gifts", true, func(w http.ResponseWriter, r *http.Request) {
+		var p rewards.GiftPatch
+		if !s.body(w, r, &p) {
 			return
 		}
-		tx, e := s.Store.Pool.Begin(r.Context())
-		if e != nil {
-			s.reply(w, r, 0, nil, e)
-			return
-		}
-		defer tx.Rollback(r.Context())
-		_, e = tx.Exec(r.Context(), `UPDATE gift_catalog SET name=$2,cost=$3,stock=$4,active=$5 WHERE id=$1`, chi.URLParam(r, "id"), p.Name, p.Cost, p.Stock, p.Active)
-		if e == nil {
-			e = platform.Audit(r.Context(), tx, user(r).ID, "gift_updated", chi.URLParam(r, "id"), p)
-		}
-		if e == nil {
-			e = tx.Commit(r.Context())
-		}
-		s.reply(w, r, 200, p, e)
+		v, e := (&rewards.Service{Store: s.Store}).UpdateGift(r.Context(), user(r).ID, chi.URLParam(r, "id"), r.Header.Get("Idempotency-Key"), p)
+		s.reply(w, r, 200, v, e)
+	}))
+	r.Post("/admin/gifts/{id}/out-of-stock", s.allowed("gifts", true, func(w http.ResponseWriter, r *http.Request) {
+		v, e := (&rewards.Service{Store: s.Store}).OutOfStock(r.Context(), user(r).ID, chi.URLParam(r, "id"), r.Header.Get("Idempotency-Key"))
+		s.reply(w, r, 200, v, e)
 	}))
 	r.Get("/admin/gift-redemptions", s.allowed("gifts", false, s.redemptionList(true)))
 	r.Post("/admin/gift-redemptions/{id}/events", s.allowed("gifts", true, func(w http.ResponseWriter, r *http.Request) {
@@ -203,7 +230,7 @@ func (s *Server) adminRoutes(r chi.Router) {
 	}))
 	r.Get("/admin/notifications", s.allowed("notifications", false, func(w http.ResponseWriter, r *http.Request) {
 		l, o := page(r)
-		s.list(w, r, `SELECT jsonb_build_object('id',id,'title',title,'body',body,'recipientId',recipient_id,'createdAt',created_at) FROM notifications WHERE NOT deleted ORDER BY created_at DESC LIMIT $1 OFFSET $2`, l, o)
+		s.list(w, r, `SELECT jsonb_build_object('id',n.id,'title',n.title,'body',n.body,'recipientId',n.recipient_id,'recipientName',u.name,'createdAt',n.created_at) FROM notifications n LEFT JOIN users u ON u.id=n.recipient_id WHERE NOT n.deleted ORDER BY n.created_at DESC,n.id DESC LIMIT $1 OFFSET $2`, l, o)
 	}))
 	r.Post("/admin/notifications", s.allowed("notifications", false, func(w http.ResponseWriter, r *http.Request) {
 		var p struct {
@@ -345,7 +372,7 @@ func (s *Server) adminRoutes(r chi.Router) {
 	}))
 	r.Get("/admin/audit-logs", s.allowed("audit", false, func(w http.ResponseWriter, r *http.Request) {
 		l, o := page(r)
-		s.list(w, r, `SELECT jsonb_build_object('id',id,'actorId',actor_id,'action',action,'resource',resource,'payload',payload,'createdAt',created_at) FROM audit_logs ORDER BY created_at DESC LIMIT $1 OFFSET $2`, l, o)
+		s.list(w, r, `SELECT jsonb_build_object('id',a.id,'actorId',a.actor_id,'actorName',u.name,'action',a.action,'resource',a.resource,'payload',a.payload,'createdAt',a.created_at) FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.created_at DESC,a.id DESC LIMIT $1 OFFSET $2`, l, o)
 	}))
 	r.Get("/admin/ledger-check", s.allowed("audit", false, func(w http.ResponseWriter, r *http.Request) {
 		s.list(w, r, `SELECT jsonb_build_object('accountId',a.id,'kind',a.kind,'balance',a.balance,'ledgerBalance',coalesce(sum(e.amount),0)) FROM wallet_accounts a LEFT JOIN wallet_entries e ON e.account_id=a.id GROUP BY a.id HAVING a.balance<>coalesce(sum(e.amount),0)`)
@@ -373,7 +400,15 @@ func (s *Server) adminRoutes(r chi.Router) {
 func (s *Server) withdrawalList(admin bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		l, o := page(r)
-		rows, e := s.pageRows(r, `SELECT jsonb_build_object('id',w.id,'userId',w.user_id,'name',u.name,'bank',w.bank,'details',w.bank_details,'amount',w.amount,'status',w.status,'processorId',w.processor_id,'bankReference',w.bank_reference,'evidenceId',w.evidence_path,'reason',w.reason,'createdAt',w.created_at) FROM withdrawals w JOIN users u ON u.id=w.user_id WHERE ($4::boolean OR w.user_id=$1) ORDER BY w.created_at DESC,w.id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o, admin)
+		status := ""
+		if admin {
+			status = r.URL.Query().Get("status")
+		}
+		if status != "" && status != "pending" && status != "processing" && status != "paid" && status != "rejected" {
+			s.reply(w, r, 0, nil, platform.Fail(422, "VALIDATION_ERROR", "Trạng thái rút tiền không hợp lệ."))
+			return
+		}
+		rows, e := s.pageRows(r, `SELECT jsonb_build_object('id',w.id,'userId',w.user_id,'name',u.name,'bank',w.bank,'details',w.bank_details,'amount',w.amount,'status',w.status,'processorId',w.processor_id,'bankReference',w.bank_reference,'evidenceId',w.evidence_path,'reason',w.reason,'createdAt',w.created_at) FROM withdrawals w JOIN users u ON u.id=w.user_id WHERE ($4::boolean OR w.user_id=$1) AND ($5='' OR w.status=$5) ORDER BY w.created_at DESC,w.id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o, admin, status)
 		if e == nil {
 			for i, b := range rows {
 				var v map[string]any
@@ -401,7 +436,16 @@ func (s *Server) withdrawalList(admin bool) http.HandlerFunc {
 func (s *Server) redemptionList(admin bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		l, o := page(r)
-		rows, e := s.pageRows(r, `SELECT jsonb_build_object('id',r.id,'userId',r.user_id,'name',u.name,'giftName',g.name,'giftId',r.gift_id,'costXu',r.cost_xu,'legacyCost',CASE WHEN r.cost_unit='legacy_coin' THEN r.cost ELSE NULL END,'costUnit',r.cost_unit,'status',r.status,'cipher',r.voucher_cipher,'reason',r.reason,'createdAt',r.created_at) FROM gift_redemptions r JOIN gift_catalog g ON g.id=r.gift_id JOIN users u ON u.id=r.user_id WHERE ($4::boolean OR r.user_id=$1) ORDER BY r.created_at DESC,r.id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o, admin)
+		status, giftID := "", ""
+		if admin {
+			status = r.URL.Query().Get("status")
+			giftID = r.URL.Query().Get("giftId")
+			if status != "" && status != "pending" && status != "completed" && status != "rejected" {
+				s.reply(w, r, 0, nil, platform.Fail(422, "VALIDATION_ERROR", "Trạng thái đổi quà không hợp lệ."))
+				return
+			}
+		}
+		rows, e := s.pageRows(r, `SELECT jsonb_build_object('id',r.id,'userId',r.user_id,'name',u.name,'giftName',g.name,'giftId',r.gift_id,'costXu',r.cost_xu,'currency',r.currency,'legacyCost',CASE WHEN r.cost_unit='legacy_coin' THEN r.cost ELSE NULL END,'costUnit',r.cost_unit,'status',r.status,'cipher',r.voucher_cipher,'reason',r.reason,'createdAt',r.created_at) FROM gift_redemptions r JOIN gift_catalog g ON g.id=r.gift_id JOIN users u ON u.id=r.user_id WHERE ($4::boolean OR r.user_id=$1) AND ($5='' OR r.status=$5) AND ($6='' OR r.gift_id=$6) ORDER BY r.created_at DESC,r.id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o, admin, status, giftID)
 		if e == nil {
 			for i, b := range rows {
 				var v map[string]any

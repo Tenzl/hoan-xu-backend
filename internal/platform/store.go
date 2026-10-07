@@ -126,7 +126,20 @@ func Accounts(ctx context.Context, tx pgx.Tx, user string) error {
 	if _, e = tx.Exec(ctx, `INSERT INTO wallet_accounts(user_id,kind) SELECT $1,'gift_held' WHERE EXISTS(SELECT 1 FROM pg_attribute WHERE attrelid='gift_redemptions'::regclass AND attname='cost_xu' AND NOT attisdropped) ON CONFLICT DO NOTHING`, user); e != nil {
 		return e
 	}
+	if _, e = tx.Exec(ctx, `INSERT INTO wallet_accounts(user_id,kind) SELECT $1,k.kind FROM (VALUES('green_available'),('green_gift_held')) k(kind) WHERE to_regclass('xu_exchange_policies') IS NOT NULL ON CONFLICT DO NOTHING`, user); e != nil {
+		return e
+	}
 	_, e = tx.Exec(ctx, `INSERT INTO coin_accounts(user_id) VALUES($1) ON CONFLICT DO NOTHING`, user)
+	if e != nil {
+		return e
+	}
+	var totals bool
+	if e = tx.QueryRow(ctx, `SELECT to_regclass('wallet_user_totals') IS NOT NULL`).Scan(&totals); e != nil {
+		return e
+	}
+	if totals {
+		_, e = tx.Exec(ctx, `INSERT INTO wallet_user_totals(user_id) VALUES($1) ON CONFLICT DO NOTHING`, user)
+	}
 	return e
 }
 

@@ -213,12 +213,8 @@ func (s *Service) applyOne(ctx context.Context, batch string) (bool, error) {
 			} else {
 				status = "duplicate"
 				if oldStatus == "approved" && (oldCommission != row.Commission || row.Status != "approved" || oldValue != row.Value) {
-					status = "adjustment"
-					// Preserve the existing explicit ledger adjustment flow, but retain the latest source state.
-					_, e = tx.Exec(ctx, `UPDATE orders SET source_status=$5 WHERE channel=$1 AND publisher=$2 AND external_id=$3 AND line_id=$4`, row.Channel, row.Publisher, row.OrderID, row.LineID, row.Status)
-					if e != nil {
-						return false, e
-					}
+					status = "ignored"
+					row.Error = "Đơn đã duyệt không được thay đổi; báo cáo mới đã được bỏ qua."
 				} else if oldStatus == "pending" || oldStatus == "rejected" {
 					cash, er := cashback.OrderAmount(row.Commission, oldBps, mode)
 					if er != nil {

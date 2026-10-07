@@ -4839,7 +4839,8 @@
             }
           }
         },
-        "summary": "POST /gift-redemptions"
+        "summary": "POST /gift-redemptions",
+        "description": "New requests reserve GREEN Xu only; existing requests retain GOLD funding. No automatic conversion."
       }
     },
     "/notifications": {
@@ -5439,7 +5440,9 @@
                     "meta"
                   ],
                   "properties": {
-                    "data": {},
+                    "data": {
+                      "$ref": "#/components/schemas/AdminDashboard"
+                    },
                     "meta": {
                       "type": "object",
                       "properties": {
@@ -5524,7 +5527,8 @@
             }
           }
         },
-        "summary": "GET /admin/dashboard"
+        "summary": "GET /admin/dashboard",
+        "description": "All totals include only customers with non-whitespace email: commission/cashback/retained/pending orders, customers, links, pending withdrawals/gifts and paid withdrawals. All legacy history/manual entries are excluded. Empty aggregates are zero."
       }
     },
     "/admin/orders": {
@@ -5562,8 +5566,12 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "minLength": 0,
-              "maxLength": 500
+              "enum": [
+                "",
+                "pending",
+                "approved",
+                "rejected"
+              ]
             }
           },
           {
@@ -5578,6 +5586,15 @@
               ]
             },
             "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "description": "Search customer name, order code or product name before pagination."
           }
         ],
         "responses": {
@@ -5592,7 +5609,7 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/Order"
+                        "$ref": "#/components/schemas/AdminOrder"
                       }
                     },
                     "meta": {
@@ -6052,6 +6069,19 @@
               ]
             },
             "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "new",
+                "legacy"
+              ]
+            },
+            "description": "new: customers with email; legacy: empty/whitespace-only email. Omitted: all customers."
           }
         ],
         "responses": {
@@ -6066,14 +6096,14 @@
                     "meta"
                   ],
                   "properties": {
-                    "data": {},
-                    "meta": {
-                      "type": "object",
-                      "properties": {
-                        "requestId": {
-                          "type": "string"
-                        }
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AdminCustomer"
                       }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
                     }
                   }
                 }
@@ -6256,6 +6286,16 @@
               }
             }
           },
+          "404": {
+            "description": "Customer or owned order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "409": {
             "description": "State or idempotency conflict",
             "content": {
@@ -6307,7 +6347,149 @@
             }
           }
         },
-        "summary": "PATCH /admin/users/{id}"
+        "summary": "PATCH /admin/users/{id}",
+        "description": "Legacy customers only (empty/whitespace-only email). New customers return 403 CUSTOMER_READ_ONLY. Existing users permission, recent password and CSRF requirements apply."
+      },
+      "get": {
+        "operationId": "getAdminCustomer",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AdminCustomer"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Customer or owned order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "getAdminCustomer",
+        "description": "Requires both users and orders permissions (admin bypass). Customers only; unknown customer or foreign order returns 404."
       }
     },
     "/admin/internal-accounts": {
@@ -6797,6 +6979,21 @@
               ]
             },
             "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "",
+                "pending",
+                "processing",
+                "paid",
+                "rejected"
+              ]
+            },
+            "description": "Filter before pagination."
           }
         ],
         "responses": {
@@ -7191,6 +7388,173 @@
           }
         },
         "summary": "GET /admin/gifts"
+      },
+      "post": {
+        "operationId": "post__admin_gifts",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 500
+            },
+            "description": "Token from GET /me; Origin must match the configured frontend."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Gift"
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "requestId": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Gift not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GiftCreate"
+              }
+            }
+          }
+        },
+        "summary": "Create a gift"
       }
     },
     "/admin/gifts/{id}": {
@@ -7236,6 +7600,16 @@
               "maxLength": 500
             },
             "description": "Token from GET /me; Origin must match the configured frontend."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
           }
         ],
         "responses": {
@@ -7250,7 +7624,9 @@
                     "meta"
                   ],
                   "properties": {
-                    "data": {},
+                    "data": {
+                      "$ref": "#/components/schemas/Gift"
+                    },
                     "meta": {
                       "type": "object",
                       "properties": {
@@ -7286,6 +7662,16 @@
           },
           "403": {
             "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Gift not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -7390,6 +7776,28 @@
               ]
             },
             "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "",
+                "pending",
+                "completed",
+                "rejected"
+              ]
+            }
+          },
+          {
+            "name": "giftId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -8009,21 +8417,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AdminNotification"
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
                   "required": [
                     "data",
                     "meta"
-                  ],
-                  "properties": {
-                    "data": {},
-                    "meta": {
-                      "type": "object",
-                      "properties": {
-                        "requestId": {
-                          "type": "string"
-                        }
-                      }
-                    }
-                  }
+                  ]
                 }
               }
             }
@@ -9137,21 +9546,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AdminAuditLog"
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
                   "required": [
                     "data",
                     "meta"
-                  ],
-                  "properties": {
-                    "data": {},
-                    "meta": {
-                      "type": "object",
-                      "properties": {
-                        "requestId": {
-                          "type": "string"
-                        }
-                      }
-                    }
-                  }
+                  ]
                 }
               }
             }
@@ -12262,6 +12672,3675 @@
         },
         "summary": "Customer purchases and links awaiting reports"
       }
+    },
+    "/admin/users/{userId}/orders": {
+      "get": {
+        "operationId": "getAdminCustomerOrders",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "perPage",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 500
+            }
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AdminOrder"
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Customer or owned order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "getAdminCustomerOrders",
+        "description": "Requires both users and orders permissions (admin bypass). Customers only; unknown customer or foreign order returns 404."
+      },
+      "post": {
+        "operationId": "createLegacyCustomerOrder",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            },
+            "description": "Reuse on retry; a different payload under the same key returns 409."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 500
+            },
+            "description": "Token from GET /me; Origin must match the configured frontend."
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/LegacyCustomerOrderCreated"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Customer or owned order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LegacyCustomerOrderInput"
+              }
+            }
+          }
+        },
+        "summary": "createLegacyCustomerOrder",
+        "description": "Requires users AND orders permissions, recent password authentication, and CSRF. Only customers with empty/whitespace-only email may be changed; new customers return 403 CUSTOMER_READ_ONLY. Creates an approved admin-legacy order and credits Xu atomically. Requires Idempotency-Key; retries credit once. approvedAt is the save time. No platform report or tracking required. Existing wallet debt rules apply."
+      }
+    },
+    "/admin/users/{userId}/orders/{orderId}": {
+      "get": {
+        "operationId": "getAdminCustomerOrder",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AdminOrder"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Customer or owned order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "getAdminCustomerOrder",
+        "description": "Requires both users and orders permissions (admin bypass). Customers only; unknown customer or foreign order returns 404."
+      }
+    },
+    "/admin/users/{userId}/name": {
+      "patch": {
+        "operationId": "renameLegacyCustomer",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 500
+            },
+            "description": "Token from GET /me; Origin must match the configured frontend."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AdminCustomerNameInput"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Customer or owned order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminCustomerNameInput"
+              }
+            }
+          }
+        },
+        "summary": "renameLegacyCustomer",
+        "description": "Requires users AND orders permissions, recent password authentication, and CSRF. Only customers with empty/whitespace-only email may be changed; new customers return 403 CUSTOMER_READ_ONLY."
+      }
+    },
+    "/admin/gifts/{id}/out-of-stock": {
+      "post": {
+        "operationId": "post__admin_gifts__id__out_of_stock",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 500
+            },
+            "description": "Token from GET /me; Origin must match the configured frontend."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/GiftOutOfStockResult"
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "requestId": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Gift not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Mark gift out of stock and refund all pending redemptions",
+        "description": "Atomic and idempotent. Keeps the gift visible, refunds the original held Xu, records reason Hàng đã hết and sends personalized notifications. Does not replenish stock or affect completed redemptions."
+      }
+    },
+    "/wallet/exchange-policy": {
+      "get": {
+        "operationId": "get__wallet_exchange_policy",
+        "tags": [
+          "Customer"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/XuExchangeQuotePolicy"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "GET /wallet/exchange-policy",
+        "description": "Returns the current base rate, configured tier names and bonus, calculated from approved cashback in the current and previous membership periods."
+      }
+    },
+    "/wallet/exchanges": {
+      "post": {
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "description": "Exchanges gold to green with the server-calculated tier bonus: floor(goldAmountXu * greenUnits * (100 + bonusPercent) / (goldUnits * 100)). Only rounds once at the end. Rejects stale base or membership quotes; successful idempotent replay preserves its original result and updates neither balances nor goldUsed again.",
+        "responses": {
+          "201": {
+            "description": "Cashback policy version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/XuExchangeResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or recent authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale policy version or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid tiers or percentage precision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "POST /wallet/exchanges",
+        "parameters": [
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 500
+            },
+            "description": "Token from GET /me; Origin must match the configured frontend."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            },
+            "description": "Reuse on retry; a different payload under the same key returns 409."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/XuExchangeInput"
+              }
+            }
+          }
+        },
+        "operationId": "post__wallet_exchanges"
+      }
+    },
+    "/admin/xu-exchange-policies/current": {
+      "get": {
+        "operationId": "get__admin_xu_exchange_policies_current",
+        "tags": [
+          "Customer"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/XuExchangePolicy"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "GET /admin/xu-exchange-policies/current",
+        "description": "Requires settings permission."
+      }
+    },
+    "/admin/xu-exchange-policies": {
+      "post": {
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "description": "Creates immutable rate version. Requires settings permission, CSRF, recent authentication, Idempotency-Key; audited. Stale currentVersionId returns 409.",
+        "responses": {
+          "201": {
+            "description": "Cashback policy version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/XuExchangePolicy"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or recent authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale policy version or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid tiers or percentage precision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "POST /admin/xu-exchange-policies",
+        "parameters": [
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 500
+            },
+            "description": "Token from GET /me; Origin must match the configured frontend."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            },
+            "description": "Reuse on retry; a different payload under the same key returns 409."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/XuExchangePolicyInput"
+              }
+            }
+          }
+        },
+        "operationId": "post__admin_xu_exchange_policies"
+      }
+    },
+    "/admin/orders/{id}": {
+      "get": {
+        "operationId": "get__admin_orders__id_",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AdminOrder"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "GET /admin/orders/{id}",
+        "description": "Requires orders permission (admin bypass). Read-only administrative detail with tax and projected profit. Invalid UUID returns 422, missing order 404."
+      }
+    },
+    "/admin/users/{userId}/orders/batch": {
+      "post": {
+        "operationId": "createLegacyCustomerOrderBatch",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            },
+            "description": "Reuse on retry; a different payload under the same key returns 409."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 500
+            },
+            "description": "Token from GET /me; Origin must match the configured frontend."
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/LegacyCustomerOrderBatchCreated"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Customer or owned order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LegacyCustomerOrderBatchInput"
+              }
+            }
+          }
+        },
+        "summary": "createLegacyCustomerOrderBatch",
+        "description": "Requires users AND orders permissions, recent password authentication, and CSRF. Only customers with empty/whitespace-only email may be changed; new customers return 403 CUSTOMER_READ_ONLY. Creates an approved admin-legacy order and credits Xu atomically. Requires Idempotency-Key; retries credit once. approvedAt is the save time. No platform report or tracking required. Existing wallet debt rules apply. Batch of 1–100; all-or-nothing. Indexed validation errors."
+      }
+    },
+    "/leaderboard-prizes/current": {
+      "get": {
+        "operationId": "getCurrentWeeklyPrize",
+        "tags": [
+          "Customer"
+        ],
+        "security": [],
+        "parameters": [
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/WeeklyPrizeCampaign"
+                        }
+                      ],
+                      "nullable": true
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Customer or owned order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "getCurrentWeeklyPrize",
+        "description": "Only active current Vietnam calendar week; null otherwise. No next-week preview."
+      }
+    },
+    "/me/leaderboard-awards": {
+      "get": {
+        "operationId": "getMyWeeklyPrizeAwards",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WeeklyPrizeAward"
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Customer or owned order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "getMyWeeklyPrizeAwards",
+        "description": "Own awards only. Delivery information decrypted only for owner; no public delivery information."
+      }
+    },
+    "/admin/leaderboard-prizes": {
+      "get": {
+        "operationId": "listWeeklyPrizeCampaigns",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WeeklyPrizeCampaign"
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Customer or owned order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "listWeeklyPrizeCampaigns",
+        "description": "Requires gifts permission. Last 100 weeks, newest first."
+      },
+      "post": {
+        "operationId": "saveWeeklyPrizeCampaign",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            },
+            "description": "Reuse on retry; a different payload under the same key returns 409."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 500
+            },
+            "description": "Token from GET /me; Origin must match the configured frontend."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WeeklyPrizeCampaign"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Customer or owned order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WeeklyPrizeCampaignInput"
+              }
+            }
+          }
+        },
+        "summary": "saveWeeklyPrizeCampaign",
+        "description": "Requires gifts, recent password, CSRF and Idempotency-Key. Current/next Monday midnight GMT+7 only. Version 0 creates; update with current version. Atomically reserve/return five gift units; ended campaigns immutable."
+      }
+    },
+    "/admin/leaderboard-prizes/{id}/preview": {
+      "get": {
+        "operationId": "previewWeeklyPrizeWinners",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WeeklyPrizePreview"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Customer or owned order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "previewWeeklyPrizeWinners",
+        "description": "Requires gifts. Returns fixed winners when settled; otherwise current ranking and hash covering campaign version and all winner fields."
+      }
+    },
+    "/admin/leaderboard-prizes/{id}/settle": {
+      "post": {
+        "operationId": "settleWeeklyPrizeWinners",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            },
+            "description": "Reuse on retry; a different payload under the same key returns 409."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 500
+            },
+            "description": "Token from GET /me; Origin must match the configured frontend."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WeeklyPrizeCampaign"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Customer or owned order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WeeklyPrizeSettlementInput"
+              }
+            }
+          }
+        },
+        "summary": "settleWeeklyPrizeWinners",
+        "description": "Requires gifts, recent auth, CSRF and idempotency. Active ended week only; stale preview returns 409. Persists top five, returns unused inventory, no wallet entries."
+      }
+    },
+    "/admin/leaderboard-prizes/{id}/awards": {
+      "get": {
+        "operationId": "listWeeklyPrizeAwards",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WeeklyPrizeAward"
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Customer or owned order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "listWeeklyPrizeAwards",
+        "description": "Requires gifts permission. Private delivery details for selected campaign."
+      }
+    },
+    "/admin/leaderboard-awards/{id}/deliver": {
+      "post": {
+        "operationId": "deliverWeeklyPrizeAward",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            },
+            "description": "Reuse on retry; a different payload under the same key returns 409."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 500
+            },
+            "description": "Token from GET /me; Origin must match the configured frontend."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WeeklyPrizeDelivered"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Customer or owned order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WeeklyPrizeDeliveryInput"
+              }
+            }
+          }
+        },
+        "summary": "deliverWeeklyPrizeAward",
+        "description": "Requires gifts, recent auth, CSRF and idempotency. Encrypts delivery note; immutable after delivery. Retrying cannot repeat notifications or change voucher."
+      }
+    },
+    "/admin/internal-accounts/{id}/permissions": {
+      "put": {
+        "operationId": "put__admin_internal_accounts__id__permissions",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 500
+            },
+            "description": "Token from GET /me; Origin must match the configured frontend."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "updated": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "updated"
+                      ]
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Internal account not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InternalPermissionsInput"
+              }
+            }
+          }
+        },
+        "summary": "PUT /admin/internal-accounts/{id}/permissions",
+        "description": "Administrator only. Requires CSRF and recent password authentication. Self-management is denied. Changes only this property, revokes target sessions and records an audit event atomically."
+      }
+    },
+    "/admin/internal-accounts/{id}/reset-password": {
+      "post": {
+        "operationId": "post__admin_internal_accounts__id__reset_password",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 500
+            },
+            "description": "Token from GET /me; Origin must match the configured frontend."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "updated": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "updated"
+                      ]
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Internal account not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InternalPasswordInput"
+              }
+            }
+          }
+        },
+        "summary": "POST /admin/internal-accounts/{id}/reset-password",
+        "description": "Administrator only. Requires CSRF and recent password authentication. Self-management is denied. Changes only this property, revokes target sessions and records an audit event atomically."
+      }
+    },
+    "/admin/internal-accounts/{id}/status": {
+      "patch": {
+        "operationId": "patch__admin_internal_accounts__id__status",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 500
+            },
+            "description": "Token from GET /me; Origin must match the configured frontend."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "updated": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "updated"
+                      ]
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Internal account not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InternalStatusInput"
+              }
+            }
+          }
+        },
+        "summary": "PATCH /admin/internal-accounts/{id}/status",
+        "description": "Administrator only. Requires CSRF and recent password authentication. Self-management is denied. Changes only this property, revokes target sessions and records an audit event atomically."
+      }
+    },
+    "/admin/work-queues": {
+      "get": {
+        "operationId": "get__admin_work_queues",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AdminWorkQueues"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "GET /admin/work-queues",
+        "description": "Available to all internal accounts. Counts include registered and legacy customers. Keys are omitted for modules the caller cannot access."
+      }
+    },
+    "/admin/notification-recipients": {
+      "get": {
+        "operationId": "get__admin_notification_recipients",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "perPage",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/NotificationRecipient"
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "GET /admin/notification-recipients",
+        "description": "Requires notifications permission; users permission is not required. Only customer ID, name and email are returned."
+      }
     }
   },
   "components": {
@@ -12822,7 +16901,6 @@
             "enum": [
               "approved",
               "rejected",
-              "adjustment",
               "reopened"
             ]
           },
@@ -12830,12 +16908,6 @@
             "type": "string",
             "minLength": 0,
             "maxLength": 500
-          },
-          "commission": {
-            "type": "integer",
-            "format": "int64",
-            "minimum": 0,
-            "maximum": 1000000000000
           }
         },
         "required": [
@@ -12886,7 +16958,7 @@
             "type": "integer",
             "format": "int64",
             "minimum": 1,
-            "maximum": 1000000
+            "maximum": 1000000000000
           },
           "stock": {
             "type": "integer",
@@ -12896,14 +16968,50 @@
           },
           "active": {
             "type": "boolean"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "shopee",
+              "lazada",
+              "tiktok",
+              "tiki",
+              ""
+            ],
+            "nullable": true
+          },
+          "icon": {
+            "type": "string",
+            "enum": [
+              "gift",
+              "ticket",
+              "shopping-bag",
+              "box",
+              "coffee",
+              "headphones",
+              "star",
+              "heart"
+            ]
+          },
+          "expectedStock": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "imageUrl": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Optional HTTPS image URL; empty string removes the image. The backend does not fetch it."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "Optional plain text description. Empty string clears it."
           }
         },
-        "required": [
-          "name",
-          "costXu",
-          "stock",
-          "active"
-        ]
+        "required": [],
+        "minProperties": 1,
+        "description": "Partial update. When stock is present, expectedStock is required; mismatches return 409 GIFT_STOCK_CHANGED. Other fields are preserved."
       },
       "GiftEventInput": {
         "type": "object",
@@ -12913,7 +17021,8 @@
             "type": "string",
             "enum": [
               "completed",
-              "rejected"
+              "rejected",
+              "refund_out_of_stock"
             ]
           },
           "code": {
@@ -13168,7 +17277,10 @@
             "enum": [
               "bronze",
               "platinum",
-              "diamond"
+              "diamond",
+              "member",
+              "silver",
+              "gold"
             ],
             "nullable": true
           },
@@ -13180,6 +17292,22 @@
           },
           "internallyRejected": {
             "type": "boolean"
+          },
+          "isManual": {
+            "type": "boolean",
+            "description": "True for admin-legacy orders entered directly for customers without email."
+          },
+          "note": {
+            "type": "string",
+            "description": "Manual entry note; empty for platform orders."
+          },
+          "tierNameVi": {
+            "type": "string",
+            "nullable": true
+          },
+          "tierNameEn": {
+            "type": "string",
+            "nullable": true
           }
         },
         "required": [
@@ -13210,31 +17338,83 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0,
-            "maximum": 1000000000000
+            "maximum": 1000000000000,
+            "description": "Backward-compatible alias for gold Xu only."
           },
           "held": {
             "type": "integer",
             "format": "int64",
             "minimum": 0,
-            "maximum": 1000000000000
+            "maximum": 1000000000000,
+            "description": "Backward-compatible alias for gold Xu only."
           },
           "giftHeld": {
             "type": "integer",
             "format": "int64",
             "minimum": 0,
-            "maximum": 1000000000000
+            "maximum": 1000000000000,
+            "description": "Backward-compatible alias for gold Xu only."
           },
           "debt": {
             "type": "integer",
             "format": "int64",
             "minimum": 0,
-            "maximum": 1000000000000
+            "maximum": 1000000000000,
+            "description": "Backward-compatible alias for gold Xu only."
           },
           "unit": {
             "type": "string",
             "enum": [
               "xu"
             ]
+          },
+          "goldAvailable": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "goldHeld": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "goldGiftHeld": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "goldDebt": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "greenAvailable": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "greenGiftHeld": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "goldTotal": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Total cashback of currently approved orders, including manual orders; excludes check-ins and green bonuses. Unchanged by withdrawals and conversions."
+          },
+          "goldUsed": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Gold spent in paid bank withdrawals plus successful gold-to-green conversions. Excludes pending/rejected withdrawals and green bonuses."
           }
         },
         "required": [
@@ -13242,7 +17422,15 @@
           "held",
           "giftHeld",
           "debt",
-          "unit"
+          "unit",
+          "goldAvailable",
+          "goldHeld",
+          "goldGiftHeld",
+          "goldDebt",
+          "greenAvailable",
+          "greenGiftHeld",
+          "goldTotal",
+          "goldUsed"
         ]
       },
       "AffiliateChannel": {
@@ -13326,7 +17514,10 @@
             "enum": [
               "bronze",
               "platinum",
-              "diamond"
+              "diamond",
+              "member",
+              "silver",
+              "gold"
             ],
             "nullable": true
           },
@@ -13382,6 +17573,14 @@
             "type": "string",
             "nullable": true,
             "description": "Product name captured by the verified server checker; legacy links may be unnamed."
+          },
+          "tierNameVi": {
+            "type": "string",
+            "nullable": true
+          },
+          "tierNameEn": {
+            "type": "string",
+            "nullable": true
           }
         },
         "required": [
@@ -13439,6 +17638,10 @@
             "format": "int64",
             "minimum": 0,
             "maximum": 1000000000000
+          },
+          "liked": {
+            "type": "boolean",
+            "description": "Whether the current authenticated viewer marked this offer helpful; false for guests."
           }
         },
         "required": [
@@ -13447,7 +17650,8 @@
           "channel",
           "name",
           "createdAt",
-          "likes"
+          "likes",
+          "liked"
         ]
       },
       "Gift": {
@@ -13470,8 +17674,10 @@
               "shopee",
               "lazada",
               "tiktok",
-              "tiki"
-            ]
+              "tiki",
+              ""
+            ],
+            "nullable": true
           },
           "costXu": {
             "type": "integer",
@@ -13493,16 +17699,66 @@
           },
           "active": {
             "type": "boolean"
+          },
+          "icon": {
+            "type": "string",
+            "enum": [
+              "gift",
+              "ticket",
+              "shopping-bag",
+              "box",
+              "coffee",
+              "headphones",
+              "star",
+              "heart"
+            ],
+            "default": "gift"
+          },
+          "pendingCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pendingXu": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "imageUrl": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Optional HTTPS image URL; empty string removes the image. The backend does not fetch it."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "Optional plain text description. Empty string clears it."
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "green"
+            ]
+          },
+          "pendingGoldXu": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "pendingGreenXu": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         },
         "required": [
           "id",
           "name",
-          "channel",
           "costXu",
           "costUnit",
           "stock",
-          "active"
+          "active",
+          "icon",
+          "currency"
         ]
       },
       "Notification": {
@@ -13577,6 +17833,18 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "goldAmount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "greenAmount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "greenGiftHeldAmount": {
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
@@ -13587,7 +17855,10 @@
           "giftHeldAmount",
           "debtAmount",
           "unit",
-          "createdAt"
+          "createdAt",
+          "goldAmount",
+          "greenAmount",
+          "greenGiftHeldAmount"
         ]
       },
       "Withdrawal": {
@@ -13750,6 +18021,13 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "gold",
+              "green"
+            ]
           }
         },
         "required": [
@@ -13763,7 +18041,8 @@
           "legacyCost",
           "status",
           "reason",
-          "createdAt"
+          "createdAt",
+          "currency"
         ]
       },
       "Meta": {
@@ -14068,16 +18347,11 @@
           "tierCode": {
             "type": "string",
             "enum": [
-              "bronze",
-              "platinum",
+              "member",
+              "silver",
+              "gold",
               "diamond"
             ]
-          },
-          "minApprovedOrders": {
-            "type": "integer",
-            "format": "int64",
-            "minimum": 0,
-            "maximum": 1000000000
           },
           "minSharePercent": {
             "type": "number",
@@ -14090,13 +18364,37 @@
             "minimum": 0,
             "maximum": 100,
             "multipleOf": 1
+          },
+          "nameVi": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "nameEn": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "minGoldTotal": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "exchangeBonusPercent": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
           }
         },
         "required": [
           "tierCode",
-          "minApprovedOrders",
           "minSharePercent",
-          "maxSharePercent"
+          "maxSharePercent",
+          "nameVi",
+          "nameEn",
+          "minGoldTotal",
+          "exchangeBonusPercent"
         ]
       },
       "CashbackPolicy": {
@@ -14116,8 +18414,8 @@
             "items": {
               "$ref": "#/components/schemas/CashbackTier"
             },
-            "minItems": 3,
-            "maxItems": 3
+            "minItems": 4,
+            "maxItems": 4
           },
           "taxPercent": {
             "type": "number",
@@ -14125,13 +18423,32 @@
             "maximum": 100,
             "multipleOf": 0.01,
             "description": "Internal administrative configuration; not included in customer responses."
+          },
+          "periodMonths": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12
+          },
+          "anchorDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "dateBasis": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "ordered"
+            ]
           }
         },
         "required": [
           "id",
           "createdAt",
           "tiers",
-          "taxPercent"
+          "taxPercent",
+          "periodMonths",
+          "anchorDate",
+          "dateBasis"
         ]
       },
       "CashbackPolicyInput": {
@@ -14147,8 +18464,8 @@
             "items": {
               "$ref": "#/components/schemas/CashbackTier"
             },
-            "minItems": 3,
-            "maxItems": 3
+            "minItems": 4,
+            "maxItems": 4
           },
           "taxPercent": {
             "type": "number",
@@ -14156,12 +18473,31 @@
             "maximum": 100,
             "multipleOf": 0.01,
             "description": "Internal administrative configuration; not included in customer responses."
+          },
+          "periodMonths": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12
+          },
+          "anchorDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "dateBasis": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "ordered"
+            ]
           }
         },
         "required": [
           "currentVersionId",
           "tiers",
-          "taxPercent"
+          "taxPercent",
+          "periodMonths",
+          "anchorDate",
+          "dateBasis"
         ]
       },
       "Membership": {
@@ -14175,16 +18511,11 @@
           "tierCode": {
             "type": "string",
             "enum": [
-              "bronze",
-              "platinum",
+              "member",
+              "silver",
+              "gold",
               "diamond"
             ]
-          },
-          "minApprovedOrders": {
-            "type": "integer",
-            "format": "int64",
-            "minimum": 0,
-            "maximum": 1000000000000
           },
           "minSharePercent": {
             "type": "number",
@@ -14212,12 +18543,6 @@
             ],
             "nullable": true
           },
-          "ordersToNext": {
-            "type": "integer",
-            "format": "int64",
-            "minimum": 0,
-            "maximum": 1000000000000
-          },
           "effectiveMinSharePercent": {
             "type": "number",
             "minimum": 0,
@@ -14232,20 +18557,141 @@
           },
           "previewAvailable": {
             "type": "boolean"
+          },
+          "nameVi": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "nameEn": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "minGoldTotal": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "exchangeBonusPercent": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "startingTierCode": {
+            "type": "string",
+            "enum": [
+              "member",
+              "silver",
+              "gold",
+              "diamond"
+            ]
+          },
+          "nextPeriodTierCode": {
+            "type": "string",
+            "enum": [
+              "member",
+              "silver",
+              "gold",
+              "diamond"
+            ]
+          },
+          "periodGoldTotal": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "previousPeriodGoldTotal": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "goldToNext": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "goldToMaintain": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "periodMonths": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12
+          },
+          "anchorDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "dateBasis": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "ordered"
+            ]
+          },
+          "periodStartsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "periodEndsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startingNameVi": {
+            "type": "string"
+          },
+          "startingNameEn": {
+            "type": "string"
+          },
+          "nextPeriodNameVi": {
+            "type": "string"
+          },
+          "nextPeriodNameEn": {
+            "type": "string"
           }
         },
         "required": [
           "policyId",
           "tierCode",
-          "minApprovedOrders",
           "minSharePercent",
           "maxSharePercent",
           "approvedOrders",
           "nextTier",
-          "ordersToNext",
           "effectiveMinSharePercent",
           "effectiveMaxSharePercent",
-          "previewAvailable"
+          "previewAvailable",
+          "nameVi",
+          "nameEn",
+          "minGoldTotal",
+          "exchangeBonusPercent",
+          "startingTierCode",
+          "nextPeriodTierCode",
+          "periodGoldTotal",
+          "previousPeriodGoldTotal",
+          "goldToNext",
+          "goldToMaintain",
+          "periodMonths",
+          "anchorDate",
+          "dateBasis",
+          "periodStartsAt",
+          "periodEndsAt",
+          "asOf",
+          "startingNameVi",
+          "startingNameEn",
+          "nextPeriodNameVi",
+          "nextPeriodNameEn"
         ]
       },
       "Dashboard": {
@@ -14274,25 +18720,29 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0,
-            "maximum": 1000000000000
+            "maximum": 1000000000000,
+            "description": "Backward-compatible alias for gold Xu only."
           },
           "held": {
             "type": "integer",
             "format": "int64",
             "minimum": 0,
-            "maximum": 1000000000000
+            "maximum": 1000000000000,
+            "description": "Backward-compatible alias for gold Xu only."
           },
           "giftHeld": {
             "type": "integer",
             "format": "int64",
             "minimum": 0,
-            "maximum": 1000000000000
+            "maximum": 1000000000000,
+            "description": "Backward-compatible alias for gold Xu only."
           },
           "debt": {
             "type": "integer",
             "format": "int64",
             "minimum": 0,
-            "maximum": 1000000000000
+            "maximum": 1000000000000,
+            "description": "Backward-compatible alias for gold Xu only."
           },
           "totalOrders": {
             "type": "integer",
@@ -14320,6 +18770,54 @@
           },
           "membership": {
             "$ref": "#/components/schemas/Membership"
+          },
+          "goldAvailable": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "goldHeld": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "goldGiftHeld": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "goldDebt": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "greenAvailable": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "greenGiftHeld": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "goldTotal": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Total cashback of currently approved orders, including manual orders; excludes check-ins and green bonuses. Unchanged by withdrawals and conversions."
+          },
+          "goldUsed": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Gold spent in paid bank withdrawals plus successful gold-to-green conversions. Excludes pending/rejected withdrawals and green bonuses."
           }
         },
         "required": [
@@ -14334,7 +18832,15 @@
           "pendingOrders",
           "rejectedOrders",
           "unit",
-          "membership"
+          "membership",
+          "goldAvailable",
+          "goldHeld",
+          "goldGiftHeld",
+          "goldDebt",
+          "greenAvailable",
+          "greenGiftHeld",
+          "goldTotal",
+          "goldUsed"
         ]
       },
       "AffiliateLinkCreated": {
@@ -14371,7 +18877,10 @@
             "enum": [
               "bronze",
               "platinum",
-              "diamond"
+              "diamond",
+              "member",
+              "silver",
+              "gold"
             ]
           },
           "minSharePercent": {
@@ -14432,6 +18941,14 @@
             "type": "string",
             "nullable": false,
             "description": "Product name captured by the verified server checker; legacy links may be unnamed."
+          },
+          "tierNameVi": {
+            "type": "string",
+            "nullable": true
+          },
+          "tierNameEn": {
+            "type": "string",
+            "nullable": true
           }
         },
         "required": [
@@ -14510,6 +19027,18 @@
               "type": "string",
               "format": "date"
             }
+          },
+          "greenAvailable": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "green"
+            ]
           }
         },
         "required": [
@@ -14519,7 +19048,9 @@
           "best",
           "today",
           "checkedIn",
-          "days"
+          "days",
+          "greenAvailable",
+          "currency"
         ]
       },
       "CheckinResult": {
@@ -14539,13 +19070,27 @@
           "day": {
             "type": "string",
             "format": "date"
+          },
+          "greenAvailable": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "green"
+            ]
           }
         },
         "required": [
           "awardXu",
           "available",
           "streak",
-          "day"
+          "day",
+          "greenAvailable",
+          "currency"
         ]
       },
       "RemoteBrowserAccess": {
@@ -14649,16 +19194,11 @@
           "tierCode": {
             "type": "string",
             "enum": [
-              "bronze",
-              "platinum",
+              "member",
+              "silver",
+              "gold",
               "diamond"
             ]
-          },
-          "minApprovedOrders": {
-            "type": "integer",
-            "format": "int64",
-            "minimum": 0,
-            "maximum": 1000000000
           },
           "minSharePercent": {
             "type": "number",
@@ -14688,16 +19228,40 @@
           },
           "previewAvailable": {
             "type": "boolean"
+          },
+          "nameVi": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "nameEn": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "minGoldTotal": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "exchangeBonusPercent": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
           }
         },
         "required": [
           "tierCode",
-          "minApprovedOrders",
           "minSharePercent",
           "maxSharePercent",
           "effectiveMinSharePercent",
           "effectiveMaxSharePercent",
-          "previewAvailable"
+          "previewAvailable",
+          "nameVi",
+          "nameEn",
+          "minGoldTotal",
+          "exchangeBonusPercent"
         ],
         "description": "Customer reward range after applying the internal policy; no internal configuration is exposed."
       },
@@ -15062,6 +19626,1302 @@
             "nullable": true
           }
         }
+      },
+      "AdminCustomer": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "customer"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "new",
+              "legacy"
+            ]
+          },
+          "blocked": {
+            "type": "boolean"
+          },
+          "trackingCode": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "available": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "held": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "giftHeld": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "goldAvailable": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "goldHeld": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "goldGiftHeld": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "goldDebt": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "greenAvailable": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "greenGiftHeld": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "weekRank": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "monthRank": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "goldTotal": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Total cashback of currently approved orders, including manual orders; excludes check-ins and green bonuses. Unchanged by withdrawals and conversions."
+          },
+          "goldUsed": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Gold spent in paid bank withdrawals plus successful gold-to-green conversions. Excludes pending/rejected withdrawals and green bonuses."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "email",
+          "role",
+          "kind",
+          "blocked",
+          "trackingCode",
+          "createdAt",
+          "available",
+          "held",
+          "giftHeld",
+          "goldAvailable",
+          "goldHeld",
+          "goldGiftHeld",
+          "goldDebt",
+          "greenAvailable",
+          "greenGiftHeld",
+          "weekRank",
+          "monthRank",
+          "goldTotal",
+          "goldUsed"
+        ]
+      },
+      "AdminCustomerNameInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "LegacyCustomerOrderInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "productName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "orderedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Order time, no later than now. UI uses GMT+7."
+          },
+          "cashback": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 1000000000000
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "productName",
+          "orderedAt",
+          "cashback"
+        ]
+      },
+      "LegacyCustomerOrderCreated": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "approved"
+            ]
+          },
+          "cashback": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "cashback"
+        ]
+      },
+      "GiftCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "costXu": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 1000000000000
+          },
+          "stock": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "shopee",
+              "lazada",
+              "tiktok",
+              "tiki",
+              ""
+            ],
+            "nullable": true
+          },
+          "icon": {
+            "type": "string",
+            "enum": [
+              "gift",
+              "ticket",
+              "shopping-bag",
+              "box",
+              "coffee",
+              "headphones",
+              "star",
+              "heart"
+            ],
+            "default": "gift"
+          },
+          "imageUrl": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Optional HTTPS image URL; empty string removes the image. The backend does not fetch it."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "Optional plain text description. Empty string clears it."
+          }
+        },
+        "required": [
+          "name",
+          "costXu",
+          "stock",
+          "active"
+        ]
+      },
+      "GiftOutOfStockResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "giftId": {
+            "type": "string"
+          },
+          "stock": {
+            "type": "integer",
+            "enum": [
+              0
+            ]
+          },
+          "refundedCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "refundedXu": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "refundedGoldXu": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "refundedGreenXu": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "giftId",
+          "stock",
+          "refundedCount",
+          "refundedXu",
+          "refundedGoldXu",
+          "refundedGreenXu"
+        ]
+      },
+      "XuExchangePolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "goldUnits": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "greenUnits": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "goldUnits",
+          "greenUnits",
+          "createdAt"
+        ]
+      },
+      "XuExchangePolicyInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "currentVersionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "goldUnits": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "greenUnits": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          }
+        },
+        "required": [
+          "currentVersionId",
+          "goldUnits",
+          "greenUnits"
+        ]
+      },
+      "XuExchangeInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "goldAmountXu": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 1000000000000
+          },
+          "expectedPolicyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedTierCode": {
+            "type": "string",
+            "enum": [
+              "bronze",
+              "platinum",
+              "diamond",
+              "member",
+              "silver",
+              "gold"
+            ]
+          },
+          "expectedCashbackPolicyId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "goldAmountXu",
+          "expectedPolicyId"
+        ],
+        "description": "New clients send expectedTierCode and expectedCashbackPolicyId together to confirm the quoted membership. Omitting both remains compatible; the server always calculates the current membership bonus."
+      },
+      "XuExchangeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "policyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "goldSpent": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "greenReceived": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "goldAvailable": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "greenAvailable": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "tierCode": {
+            "type": "string",
+            "enum": [
+              "bronze",
+              "platinum",
+              "diamond",
+              "member",
+              "silver",
+              "gold"
+            ]
+          },
+          "bonusPercent": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Configured membership bonus applied once to the base exchange rate."
+          },
+          "cashbackPolicyId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id",
+          "policyId",
+          "goldSpent",
+          "greenReceived",
+          "goldAvailable",
+          "greenAvailable"
+        ]
+      },
+      "AdminOrder": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 500
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "shopee",
+              "lazada",
+              "tiktok",
+              "tiki"
+            ]
+          },
+          "productName": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 500
+          },
+          "value": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "commission": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "cashback": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ]
+          },
+          "sourceStatus": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ]
+          },
+          "orderedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "externalId": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 500
+          },
+          "lineId": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 500
+          },
+          "publisher": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 500
+          },
+          "policyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tierCode": {
+            "type": "string",
+            "enum": [
+              "bronze",
+              "platinum",
+              "diamond",
+              "member",
+              "silver",
+              "gold"
+            ],
+            "nullable": true
+          },
+          "sharePercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01
+          },
+          "internallyRejected": {
+            "type": "boolean"
+          },
+          "isManual": {
+            "type": "boolean",
+            "description": "True for admin-legacy orders entered directly for customers without email."
+          },
+          "note": {
+            "type": "string",
+            "description": "Manual entry note; empty for platform orders."
+          },
+          "taxAmount": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "minimum": 0,
+            "description": "Fixed 5% of commission, floored per order in VND. Zero for rejected orders, null when real commission is unavailable."
+          },
+          "projectedProfit": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "description": "Commission minus stored cashback minus taxAmount; may be negative. Zero for rejected orders, null for placeholder commission. This is not actual bank cash paid per order."
+          },
+          "profitStatus": {
+            "type": "string",
+            "enum": [
+              "estimated",
+              "projected",
+              "excluded",
+              "unavailable"
+            ],
+            "description": "Pending orders are estimated, approved orders projected, rejected orders excluded. Legacy-server/admin-legacy commission is unavailable."
+          },
+          "tierNameVi": {
+            "type": "string",
+            "nullable": true
+          },
+          "tierNameEn": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "userId",
+          "name",
+          "channel",
+          "productName",
+          "value",
+          "commission",
+          "cashback",
+          "status",
+          "sourceStatus",
+          "orderedAt",
+          "externalId",
+          "lineId",
+          "publisher",
+          "policyId",
+          "tierCode",
+          "sharePercent",
+          "taxAmount",
+          "projectedProfit",
+          "profitStatus"
+        ],
+        "description": "Administrative order projection only; customer endpoints keep Order and do not expose tax/profit."
+      },
+      "AdminDashboard": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "commission": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cashback": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "retained": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pendingCommission": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "paid": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "pendingOrders": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "users": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "links": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "pendingWithdrawals": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "pendingGifts": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "profitUnavailableOrders": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "taxAmount": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "minimum": 0
+          },
+          "projectedProfit": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "cashProfit": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          }
+        },
+        "required": [
+          "commission",
+          "cashback",
+          "retained",
+          "pendingCommission",
+          "paid",
+          "pendingOrders",
+          "users",
+          "links",
+          "pendingWithdrawals",
+          "pendingGifts",
+          "profitUnavailableOrders",
+          "taxAmount",
+          "projectedProfit",
+          "cashProfit"
+        ],
+        "description": "Lifetime totals for customers with non-whitespace email only. taxAmount is sum(floor(approved order commission / 20)). projectedProfit is approved commission - approved cashback - tax. cashProfit is approved commission - paid withdrawals - tax (no second cashback deduction). Financial totals are null if any approved order has placeholder commission; profitUnavailableOrders reports that count. Empty totals are zero; no wallet or ledger writes."
+      },
+      "LegacyCustomerOrderBatchInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "orders": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/LegacyCustomerOrderInput"
+            }
+          }
+        },
+        "required": [
+          "orders"
+        ]
+      },
+      "LegacyCustomerOrderBatchCreated": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LegacyCustomerOrderCreated"
+            }
+          },
+          "totalCashback": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "orders",
+          "totalCashback"
+        ]
+      },
+      "WeeklyPrizeGift": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "imageUrl": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "imageUrl",
+          "icon",
+          "description"
+        ]
+      },
+      "WeeklyPrizeCampaign": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "weekStart": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "weekEnd": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "giftId": {
+            "type": "string"
+          },
+          "gift": {
+            "$ref": "#/components/schemas/WeeklyPrizeGift"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "settled"
+            ]
+          },
+          "reservedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "settledAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "weekStart",
+          "weekEnd",
+          "giftId",
+          "gift",
+          "title",
+          "description",
+          "status",
+          "reservedCount",
+          "version",
+          "settledAt"
+        ]
+      },
+      "WeeklyPrizeCampaignInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "weekStart": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "giftId": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "weekStart",
+          "giftId",
+          "enabled",
+          "title",
+          "description",
+          "version"
+        ]
+      },
+      "WeeklyPrizePreview": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "campaign": {
+            "$ref": "#/components/schemas/WeeklyPrizeCampaign"
+          },
+          "winners": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "$ref": "#/components/schemas/LeaderboardEntry"
+            }
+          },
+          "hash": {
+            "type": "string"
+          },
+          "canSettle": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "campaign",
+          "winners",
+          "hash",
+          "canSettle"
+        ]
+      },
+      "WeeklyPrizeAward": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaignId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userName": {
+            "type": "string"
+          },
+          "rank": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "xu": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "orders": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "gift": {
+            "$ref": "#/components/schemas/WeeklyPrizeGift"
+          },
+          "weekStart": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "weekEnd": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "delivered"
+            ]
+          },
+          "deliveryNote": {
+            "type": "string"
+          },
+          "deliveredAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "campaignId",
+          "userId",
+          "userName",
+          "rank",
+          "xu",
+          "orders",
+          "gift",
+          "weekStart",
+          "weekEnd",
+          "status",
+          "deliveryNote",
+          "deliveredAt"
+        ]
+      },
+      "WeeklyPrizeSettlementInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "hash": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "hash"
+        ]
+      },
+      "WeeklyPrizeDeliveryInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "deliveryNote": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "deliveryNote"
+        ]
+      },
+      "WeeklyPrizeDelivered": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "delivered"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ]
+      },
+      "XuExchangeQuotePolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "goldUnits": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "greenUnits": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tierCode": {
+            "type": "string",
+            "enum": [
+              "member",
+              "silver",
+              "gold",
+              "diamond"
+            ]
+          },
+          "bonusPercent": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Configured membership bonus applied once to the base exchange rate."
+          },
+          "cashbackPolicyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "nameVi": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "nameEn": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "id",
+          "goldUnits",
+          "greenUnits",
+          "createdAt",
+          "tierCode",
+          "bonusPercent",
+          "cashbackPolicyId",
+          "nameVi",
+          "nameEn"
+        ]
+      },
+      "InternalPermissionsInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "orders",
+                "withdrawals",
+                "users",
+                "gifts",
+                "community",
+                "notifications",
+                "settings",
+                "audit"
+              ]
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "permissions"
+        ]
+      },
+      "InternalPasswordInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "password"
+        ]
+      },
+      "InternalStatusInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blocked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "blocked"
+        ]
+      },
+      "AdminWorkQueues": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pendingOrders": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pendingWithdrawals": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "processingWithdrawals": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pendingGifts": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": []
+      },
+      "NotificationRecipient": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "email"
+        ]
+      },
+      "AdminAuditLog": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actorId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "actorName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "action": {
+            "type": "string"
+          },
+          "resource": {
+            "type": "string"
+          },
+          "payload": {},
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "actorId",
+          "actorName",
+          "action",
+          "resource",
+          "payload",
+          "createdAt"
+        ]
+      },
+      "AdminNotification": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "recipientId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "recipientName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "body",
+          "recipientId",
+          "recipientName",
+          "createdAt"
+        ]
       }
     }
   }

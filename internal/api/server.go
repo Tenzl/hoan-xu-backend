@@ -303,14 +303,19 @@ func New(s *Server) *chi.Mux {
 		})
 		r.Get("/deals", func(w http.ResponseWriter, r *http.Request) {
 			l, o := page(r)
-			s.list(w, r, `SELECT jsonb_build_object('id',d.id,'body',d.body,'channel',d.channel,'name',u.name,'createdAt',d.created_at,'likes',(SELECT count(*) FROM deal_likes WHERE deal_id=d.id)) FROM deals d JOIN users u ON u.id=d.user_id WHERE NOT d.hidden AND NOT d.deleted ORDER BY d.created_at DESC,d.id DESC LIMIT $1 OFFSET $2`, l, o)
+			var viewer any
+			if u := user(r); u != nil {
+				viewer = u.ID
+			}
+			s.list(w, r, `SELECT jsonb_build_object('id',d.id,'body',d.body,'channel',d.channel,'name',u.name,'createdAt',d.created_at,'likes',(SELECT count(*) FROM deal_likes WHERE deal_id=d.id),'liked',EXISTS(SELECT 1 FROM deal_likes WHERE deal_id=d.id AND user_id=$3::uuid)) FROM deals d JOIN users u ON u.id=d.user_id WHERE NOT d.hidden AND NOT d.deleted ORDER BY d.created_at DESC,d.id DESC LIMIT $1 OFFSET $2`, l, o, viewer)
 		})
 		r.Get("/leaderboards", s.leaderboard)
+		r.Get("/leaderboard-prizes/current", s.currentWeeklyPrize)
 		r.Get("/leaderboard", func(w http.ResponseWriter, r *http.Request) {
 			s.list(w, r, `SELECT jsonb_build_object('name',left(u.name,1)||'***','cashback',sum(o.cashback),'orders',count(*)) FROM orders o JOIN users u ON u.id=o.user_id WHERE o.status='approved' AND date_trunc('month',o.ordered_at AT TIME ZONE 'Asia/Ho_Chi_Minh')=date_trunc('month',now() AT TIME ZONE 'Asia/Ho_Chi_Minh') GROUP BY u.id ORDER BY sum(o.cashback) DESC LIMIT 5`)
 		})
 		r.Get("/gifts", func(w http.ResponseWriter, r *http.Request) {
-			s.list(w, r, `SELECT jsonb_build_object('id',id,'name',name,'channel',channel,'costXu',cost,'costUnit','xu','stock',stock,'active',active) FROM gift_catalog WHERE active ORDER BY cost,id`)
+			s.list(w, r, `SELECT jsonb_build_object('id',id,'name',name,'channel',channel,'costXu',cost,'costUnit','xu','currency','green','stock',stock,'active',active,'icon',icon,'imageUrl',image_url,'description',description) FROM gift_catalog WHERE active ORDER BY cost,id`)
 		})
 		r.Post("/product-checks", s.check)
 		r.Post("/shopee/check", s.check)
@@ -401,12 +406,25 @@ func (s *Server) customerRoutes(r chi.Router) {
 		r.Get("/me/dashboard", s.dashboard)
 		r.Get("/me/purchases", s.purchases)
 		r.Get("/me/leaderboard", s.myLeaderboard)
+		r.Get("/me/leaderboard-awards", s.myWeeklyAwards)
+		r.Get("/wallet/exchange-policy", func(w http.ResponseWriter, r *http.Request) {
+			v, e := (&wallet.Service{Store: s.Store}).CustomerExchangePolicy(r.Context(), user(r).ID)
+			s.reply(w, r, 200, v, e)
+		})
+		r.Post("/wallet/exchanges", func(w http.ResponseWriter, r *http.Request) {
+			var p wallet.ExchangeInput
+			if !s.body(w, r, &p) {
+				return
+			}
+			v, e := (&wallet.Service{Store: s.Store}).Exchange(r.Context(), user(r).ID, r.Header.Get("Idempotency-Key"), p)
+			s.reply(w, r, 201, v, e)
+		})
 		r.Get("/wallet", func(w http.ResponseWriter, r *http.Request) {
-			s.one(w, r, `SELECT jsonb_build_object('available',coalesce(max(balance) FILTER(WHERE kind='available'),0),'held',coalesce(max(balance) FILTER(WHERE kind='held'),0),'debt',coalesce(max(balance) FILTER(WHERE kind='debt'),0),'giftHeld',coalesce(max(balance) FILTER(WHERE kind='gift_held'),0),'unit','xu') FROM wallet_accounts WHERE user_id=$1`, user(r).ID)
+			s.one(w, r, `SELECT jsonb_build_object('available',coalesce(max(balance) FILTER(WHERE kind='available'),0),'held',coalesce(max(balance) FILTER(WHERE kind='held'),0),'debt',coalesce(max(balance) FILTER(WHERE kind='debt'),0),'giftHeld',coalesce(max(balance) FILTER(WHERE kind='gift_held'),0),'goldTotal',coalesce((SELECT gold_total FROM wallet_user_totals WHERE user_id=$1),0),'goldUsed',coalesce((SELECT gold_used FROM wallet_user_totals WHERE user_id=$1),0),'goldAvailable',coalesce(max(balance) FILTER(WHERE kind='available'),0),'goldHeld',coalesce(max(balance) FILTER(WHERE kind='held'),0),'goldGiftHeld',coalesce(max(balance) FILTER(WHERE kind='gift_held'),0),'goldDebt',coalesce(max(balance) FILTER(WHERE kind='debt'),0),'greenAvailable',coalesce(max(balance) FILTER(WHERE kind='green_available'),0),'greenGiftHeld',coalesce(max(balance) FILTER(WHERE kind='green_gift_held'),0),'unit','xu') FROM wallet_accounts WHERE user_id=$1`, user(r).ID)
 		})
 		r.Get("/wallet/transactions", func(w http.ResponseWriter, r *http.Request) {
 			l, o := page(r)
-			s.list(w, r, `SELECT jsonb_build_object('id',t.id,'description',t.description,'createdAt',t.created_at,'amount',coalesce(sum(e.amount) FILTER(WHERE a.kind='available'),0),'heldAmount',coalesce(sum(e.amount) FILTER(WHERE a.kind='held'),0),'giftHeldAmount',coalesce(sum(e.amount) FILTER(WHERE a.kind='gift_held'),0),'debtAmount',coalesce(sum(e.amount) FILTER(WHERE a.kind='debt'),0),'unit','xu') FROM wallet_transactions t JOIN wallet_entries e ON e.transaction_id=t.id JOIN wallet_accounts a ON a.id=e.account_id WHERE a.user_id=$1 GROUP BY t.id ORDER BY t.created_at DESC,t.id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o)
+			s.list(w, r, `SELECT jsonb_build_object('id',t.id,'description',t.description,'createdAt',t.created_at,'amount',coalesce(sum(e.amount) FILTER(WHERE a.kind='available'),0),'heldAmount',coalesce(sum(e.amount) FILTER(WHERE a.kind='held'),0),'giftHeldAmount',coalesce(sum(e.amount) FILTER(WHERE a.kind='gift_held'),0),'debtAmount',coalesce(sum(e.amount) FILTER(WHERE a.kind='debt'),0),'goldAmount',coalesce(sum(e.amount) FILTER(WHERE a.kind='available'),0),'greenAmount',coalesce(sum(e.amount) FILTER(WHERE a.kind='green_available'),0),'greenGiftHeldAmount',coalesce(sum(e.amount) FILTER(WHERE a.kind='green_gift_held'),0),'unit','xu') FROM wallet_transactions t JOIN wallet_entries e ON e.transaction_id=t.id JOIN wallet_accounts a ON a.id=e.account_id WHERE a.user_id=$1 GROUP BY t.id ORDER BY t.created_at DESC,t.id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o)
 		})
 		r.Get("/orders", func(w http.ResponseWriter, r *http.Request) {
 			l, o := page(r)
@@ -459,7 +477,7 @@ func (s *Server) customerRoutes(r chi.Router) {
 			s.reply(w, r, 201, v, e)
 		})
 		r.Get("/checkins", func(w http.ResponseWriter, r *http.Request) {
-			s.one(w, r, `SELECT jsonb_build_object('available',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'),'unit','xu','streak',streak,'best',best,'lastDay',last_day,'today',$2::text,'checkedIn',coalesce(last_day=$2::date,false),'days',coalesce((SELECT jsonb_agg(day ORDER BY day) FROM checkins WHERE user_id=$1 AND day>=($2::date-30)),'[]')) FROM coin_accounts WHERE user_id=$1`, user(r).ID, rewards.LocalDay(time.Now()))
+			s.one(w, r, `SELECT jsonb_build_object('available',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'),'greenAvailable',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='green_available'),'currency','green','unit','xu','streak',streak,'best',best,'lastDay',last_day,'today',$2::text,'checkedIn',coalesce(last_day=$2::date,false),'days',coalesce((SELECT jsonb_agg(day ORDER BY day) FROM checkins WHERE user_id=$1 AND day>=($2::date-30)),'[]')) FROM coin_accounts WHERE user_id=$1`, user(r).ID, rewards.LocalDay(time.Now()))
 		})
 		r.Post("/checkins", func(w http.ResponseWriter, r *http.Request) {
 			v, e := (&rewards.Service{Store: s.Store}).Checkin(r.Context(), user(r).ID)
@@ -523,7 +541,9 @@ func (s *Server) customerRoutes(r chi.Router) {
 	})
 }
 
-const orderSQL = `SELECT jsonb_build_object('id',o.id,'userId',o.user_id,'name',u.name,'channel',o.channel,'productName',o.product_name,'value',o.value,'commission',o.commission,'cashback',o.cashback,'status',o.status,'sourceStatus',o.source_status,'internallyRejected',o.internally_rejected,'orderedAt',o.ordered_at,'externalId',o.external_id,'lineId',o.line_id,'publisher',o.publisher,'policyId',o.policy_id,'tierCode',o.tier_code,'sharePercent',o.share_bps::numeric/100) FROM orders o JOIN users u ON u.id=o.user_id`
+const orderJSONSQL = `jsonb_build_object('id',o.id,'userId',o.user_id,'name',u.name,'channel',o.channel,'productName',o.product_name,'value',o.value,'commission',o.commission,'cashback',o.cashback,'status',o.status,'sourceStatus',o.source_status,'internallyRejected',o.internally_rejected,'orderedAt',o.ordered_at,'externalId',o.external_id,'lineId',o.line_id,'publisher',o.publisher,'policyId',o.policy_id,'tierCode',o.tier_code,'tierNameVi',(SELECT name_vi FROM cashback_tiers WHERE policy_id=o.policy_id AND tier_code=o.tier_code),'tierNameEn',(SELECT name_en FROM cashback_tiers WHERE policy_id=o.policy_id AND tier_code=o.tier_code),'sharePercent',o.share_bps::numeric/100,'isManual',o.publisher='admin-legacy','note',CASE WHEN o.publisher='admin-legacy' THEN coalesce((SELECT e.payload->>'note' FROM order_events e WHERE e.order_id=o.id AND e.payload->>'origin'='admin-legacy' ORDER BY e.created_at,e.id LIMIT 1),'') ELSE '' END)`
+const orderFromSQL = ` FROM orders o JOIN users u ON u.id=o.user_id`
+const orderSQL = `SELECT ` + orderJSONSQL + orderFromSQL
 
 func (s *Server) like(like bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -544,7 +564,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var raw []byte
-	e = tx.QueryRow(r.Context(), `SELECT jsonb_build_object('pending',coalesce((SELECT sum(cashback) FROM orders WHERE user_id=$1 AND status='pending'),0),'approved',coalesce((SELECT sum(cashback) FROM orders WHERE user_id=$1 AND status='approved'),0),'available',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'),'held',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='held'),'debt',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='debt'),'giftHeld',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='gift_held'),'totalOrders',(SELECT count(*) FROM orders WHERE user_id=$1),'pendingOrders',(SELECT count(*) FROM orders WHERE user_id=$1 AND status='pending'),'rejectedOrders',(SELECT count(*) FROM orders WHERE user_id=$1 AND status='rejected'),'unit','xu')`, user(r).ID).Scan(&raw)
+	e = tx.QueryRow(r.Context(), `SELECT jsonb_build_object('pending',coalesce((SELECT sum(cashback) FROM orders WHERE user_id=$1 AND status='pending'),0),'approved',coalesce((SELECT sum(cashback) FROM orders WHERE user_id=$1 AND status='approved'),0),'available',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'),'held',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='held'),'debt',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='debt'),'giftHeld',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='gift_held'),'goldTotal',coalesce((SELECT gold_total FROM wallet_user_totals WHERE user_id=$1),0),'goldUsed',coalesce((SELECT gold_used FROM wallet_user_totals WHERE user_id=$1),0),'goldAvailable',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'),'goldHeld',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='held'),'goldGiftHeld',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='gift_held'),'goldDebt',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='debt'),'greenAvailable',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='green_available'),'greenGiftHeld',(SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='green_gift_held'),'totalOrders',(SELECT count(*) FROM orders WHERE user_id=$1),'pendingOrders',(SELECT count(*) FROM orders WHERE user_id=$1 AND status='pending'),'rejectedOrders',(SELECT count(*) FROM orders WHERE user_id=$1 AND status='rejected'),'unit','xu')`, user(r).ID).Scan(&raw)
 	var v map[string]any
 	if e == nil {
 		e = json.Unmarshal(raw, &v)

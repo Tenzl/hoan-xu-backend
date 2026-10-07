@@ -57,7 +57,7 @@ func TestSignedCSVExpiryLateImportSnapshotDuplicateAndCancellation(t *testing.T)
 	if e := s.Pool.QueryRow(ctx, `SELECT tracking_code FROM users WHERE id=$1`, customer).Scan(&code); e != nil {
 		t.Fatal(e)
 	}
-	if e := s.Pool.QueryRow(ctx, `SELECT tracking_version FROM cashback_policies WHERE mode='tiered' ORDER BY created_at DESC LIMIT 1`).Scan(&version); e != nil {
+	if e := s.Pool.QueryRow(ctx, `SELECT tracking_version FROM cashback_policies WHERE mode='tiered' AND EXISTS(SELECT 1 FROM cashback_tiers t WHERE t.policy_id=cashback_policies.id AND t.tier_code='bronze') ORDER BY created_at DESC LIMIT 1`).Scan(&version); e != nil {
 		t.Fatal(e)
 	}
 	created := time.Now().UTC().Add(-30 * 24 * time.Hour).Truncate(time.Second)
@@ -131,7 +131,7 @@ func TestSignedCSVExpiryLateImportSnapshotDuplicateAndCancellation(t *testing.T)
 	if e != nil {
 		t.Fatal(e)
 	}
-	input := cashback.Input{CurrentVersionID: policy.ID, Tax: 9000, Tiers: []cashback.Tier{{Code: "bronze", Min: 8000, Max: 9000}, {Code: "platinum", MinOrders: 30, Min: 8000, Max: 9000}, {Code: "diamond", MinOrders: 100, Min: 8000, Max: 9000}}}
+	input := periodFixtureInput(policy.ID, []cashback.Tier{{Code: "bronze", Min: 8000, Max: 9000}, {Code: "platinum", MinGold: 30, Min: 8000, Max: 9000}, {Code: "diamond", MinGold: 100, Min: 8000, Max: 9000}}, 9000)
 	if _, e = (&cashback.Service{Store: s}).Create(ctx, admin, "changed-link-policy", input); e != nil {
 		t.Fatal(e)
 	}
@@ -152,21 +152,21 @@ func TestSignedCSVExpiryLateImportSnapshotDuplicateAndCancellation(t *testing.T)
 	if e = s.Pool.QueryRow(ctx, `SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'`, customer).Scan(&balance); e != nil || balance != 6301 {
 		t.Fatal(balance, e)
 	}
-	// An approved signed order keeps the coefficient and rounds an adjustment UP.
-	if _, e = events.Event(ctx, admin, id, "ceil-adjustment", orders.Event{Action: "adjustment", Commission: 20001, Reason: "Updated actual commission"}); e != nil {
+	// An approved signed order keeps its snapshot and rejects subsequent adjustments.
+	if _, e = events.Event(ctx, admin, id, "ceil-adjustment", orders.Event{Action: "adjustment", Reason: "Updated actual commission"}); e == nil {
 		t.Fatal(e)
 	}
-	if e = s.Pool.QueryRow(ctx, `SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'`, customer).Scan(&balance); e != nil || balance != 12601 {
+	if e = s.Pool.QueryRow(ctx, `SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'`, customer).Scan(&balance); e != nil || balance != 6301 {
 		t.Fatal(balance, e)
 	}
 
 	base.Status = "rejected"
 	base.Commission = 0
 	importRows(t, s, admin, []imports.Row{base})
-	if _, e = events.Event(ctx, admin, id, "cancel-adjustment", orders.Event{Action: "adjustment", Commission: 0, Reason: "Shopee cancelled order"}); e != nil {
+	if _, e = events.Event(ctx, admin, id, "cancel-adjustment", orders.Event{Action: "adjustment", Reason: "Shopee cancelled order"}); e == nil {
 		t.Fatal(e)
 	}
-	if e = s.Pool.QueryRow(ctx, `SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'`, customer).Scan(&balance); e != nil || balance != 0 {
+	if e = s.Pool.QueryRow(ctx, `SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'`, customer).Scan(&balance); e != nil || balance != 6301 {
 		t.Fatal(balance, e)
 	}
 	// A stored pending order whose order time was changed outside the window cannot be approved.

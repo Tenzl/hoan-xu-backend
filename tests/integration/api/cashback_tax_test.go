@@ -25,8 +25,8 @@ func TestTaxSnapshotUsesArchivedPolicyAndActualCommission(t *testing.T) {
 	if current.Tax != 500 {
 		t.Fatalf("default tax: %v", current.Tax)
 	}
-	tiers := []cashback.Tier{{Code: "bronze", MinOrders: 0, Min: 6500, Max: 7500}, {Code: "platinum", MinOrders: 30, Min: 7500, Max: 8500}, {Code: "diamond", MinOrders: 100, Min: 8500, Max: 9500}}
-	if _, err = policies.Create(ctx, admin, "tax-policy-first", cashback.Input{CurrentVersionID: current.ID, Tax: 500, Tiers: tiers}); err != nil {
+	tiers := []cashback.Tier{{Code: "bronze", MinGold: 0, Min: 6500, Max: 7500}, {Code: "platinum", MinGold: 30, Min: 7500, Max: 8500}, {Code: "diamond", MinGold: 100, Min: 8500, Max: 9500}}
+	if _, err = policies.Create(ctx, admin, "tax-policy-first", periodFixtureInput(current.ID,tiers,500)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.Pool.Exec(ctx, `UPDATE affiliate_channels SET status='available',settings='{"publisher":"fixture"}' WHERE id='shopee'`); err != nil {
@@ -60,7 +60,7 @@ func TestTaxSnapshotUsesArchivedPolicyAndActualCommission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = policies.Create(ctx, admin, "tax-policy-second", cashback.Input{CurrentVersionID: current.ID, Tax: 10000, Tiers: tiers}); err != nil {
+	if _, err = policies.Create(ctx, admin, "tax-policy-second", periodFixtureInput(current.ID,tiers,10000)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.CreateLink(ctx, customer, "https://shopee.vn/product/1/2"); err != nil {

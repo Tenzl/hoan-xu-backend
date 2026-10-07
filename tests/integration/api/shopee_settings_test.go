@@ -86,7 +86,9 @@ func TestShopeeSettingsAreAdminOnlyPersistedAndExplicitlyDisableManualBrowser(t 
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Data.Enabled || result.Data.PriceScale != 100000 || result.Data.Mode != "local" {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if w:=request("PUT",at,au.CSRF,body);w.Code!=409 {t.Fatal("stale edit accepted",w.Code)}
+	if w := request("PUT", at, au.CSRF, body); w.Code != 409 {
+		t.Fatal("stale edit accepted", w.Code)
+	}
 	for _, invalid := range []string{strings.Replace(body, `"mode":"local"`, `"mode":"other"`, 1), strings.Replace(body, `100000`, `0`, 1), strings.Replace(body, `http://127.0.0.1:9222`, `http://169.254.169.254`, 1)} {
 		if w := request("PUT", at, au.CSRF, invalid); w.Code != 422 {
 			t.Fatal("invalid configuration accepted", w.Code, w.Body.String())

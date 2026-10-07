@@ -4,7 +4,7 @@ import (
 	"context"
 	"hoanxu/internal/affiliate"
 	"hoanxu/internal/auth"
- "hoanxu/internal/browser"
+	"hoanxu/internal/browser"
 	"hoanxu/internal/remotebrowser"
 	"net/http"
 	"net/http/httptest"
@@ -49,7 +49,7 @@ func TestRemoteBrowserAccessRequiresAdminCSRFAndReauthentication(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := &Server{Store: store, Auth: a, Affiliate: &affiliate.Service{Store: store}, RemoteBrowser: remote, Origin: "http://localhost:3000"}
- srv := New(server)
+	srv := New(server)
 	request := func(token, csrf string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "/api/v1/admin/browser/access", nil)
 		r.Header.Set("Origin", "http://localhost:3000")
@@ -85,14 +85,23 @@ func TestRemoteBrowserAccessRequiresAdminCSRFAndReauthentication(t *testing.T) {
 			t.Fatal(p, w.Code)
 		}
 	}
- // Native development windows retain the same administrator/CSRF/reauth gates.
- server.RemoteBrowser = nil
- server.LocalBrowser = true
- server.Affiliate.Browser = browser.NewManual("missing-test-chromium-executable", t.TempDir())
- for _, tc := range []struct { token, csrf string; code int }{{"", "", 401}, {ct, cu.CSRF, 403}, {st, su.CSRF, 403}, {at, "", 403}, {at, au.CSRF, 503}} {
-  if w := request(tc.token, tc.csrf); w.Code != tc.code { t.Fatal("native Chrome access", w.Code, w.Body.String()) }
- }
- if _, err = store.Pool.Exec(ctx, `UPDATE sessions SET reauthenticated_at=NULL WHERE id=$1`, au.SessionID); err != nil { t.Fatal(err) }
- if w := request(at, au.CSRF); w.Code != 403 { t.Fatal("native Chrome bypassed reauthentication", w.Code) }
+	// Native development windows retain the same administrator/CSRF/reauth gates.
+	server.RemoteBrowser = nil
+	server.LocalBrowser = true
+	server.Affiliate.Browser = browser.NewManual("missing-test-chromium-executable", t.TempDir())
+	for _, tc := range []struct {
+		token, csrf string
+		code        int
+	}{{"", "", 401}, {ct, cu.CSRF, 403}, {st, su.CSRF, 403}, {at, "", 403}, {at, au.CSRF, 503}} {
+		if w := request(tc.token, tc.csrf); w.Code != tc.code {
+			t.Fatal("native Chrome access", w.Code, w.Body.String())
+		}
+	}
+	if _, err = store.Pool.Exec(ctx, `UPDATE sessions SET reauthenticated_at=NULL WHERE id=$1`, au.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if w := request(at, au.CSRF); w.Code != 403 {
+		t.Fatal("native Chrome bypassed reauthentication", w.Code)
+	}
 
 }

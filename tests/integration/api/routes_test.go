@@ -107,7 +107,7 @@ func TestAllReadRoutesAndManualOrderAgainstPostgreSQL(t *testing.T) {
 	if e := store.Pool.QueryRow(ctx, `SELECT tracking_code FROM users WHERE id=$1`, customer).Scan(&code); e != nil {
 		t.Fatal(e)
 	}
-	if e := store.Pool.QueryRow(ctx, `SELECT tracking_version FROM cashback_policies WHERE mode='tiered' ORDER BY created_at DESC LIMIT 1`).Scan(&version); e != nil {
+	if e := store.Pool.QueryRow(ctx, `SELECT tracking_version FROM cashback_policies WHERE mode='tiered' AND EXISTS(SELECT 1 FROM cashback_tiers t WHERE t.policy_id=cashback_policies.id AND t.tier_code='bronze') ORDER BY created_at DESC LIMIT 1`).Scan(&version); e != nil {
 		t.Fatal(e)
 	}
 	at := time.Now().UTC().Truncate(time.Second)

@@ -95,9 +95,8 @@ type PublicTier struct {
 type PublicMembership struct {
 	PolicyID string `json:"policyId"`
 	PublicTier
-	ApprovedOrders int64       `json:"approvedOrders"`
-	NextTier       *PublicTier `json:"nextTier"`
-	OrdersToNext   int64       `json:"ordersToNext"`
+	MembershipProgress
+	NextTier *PublicTier `json:"nextTier"`
 }
 
 func publicTier(t Tier, tax int) PublicTier {
@@ -125,7 +124,7 @@ func publicTier(t Tier, tax int) PublicTier {
 	return p
 }
 func (m Membership) Public() PublicMembership {
-	p := PublicMembership{PolicyID: m.PolicyID, PublicTier: publicTier(m.Tier, int(m.Tax)), ApprovedOrders: m.ApprovedOrders, OrdersToNext: m.OrdersToNext}
+	p := PublicMembership{PolicyID: m.PolicyID, PublicTier: publicTier(m.Tier, int(m.Tax)), MembershipProgress: m.MembershipProgress}
 	if m.NextTier != nil {
 		next := publicTier(*m.NextTier, int(m.Tax))
 		p.NextTier = &next

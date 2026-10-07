@@ -16,18 +16,25 @@ type AffiliateChannel struct {
 }
 
 type AffiliateLink struct {
-	ID           pgtype.UUID
-	UserID       pgtype.UUID
-	Channel      string
-	OriginalUrl  string
-	AffiliateUrl string
-	TrackingCode string
-	PolicyID     pgtype.UUID
-	ItemID       pgtype.Text
-	CreatedAt    pgtype.Timestamptz
-	TierCode     pgtype.Text
-	MinShareBps  int32
-	MaxShareBps  int32
+	ID                     pgtype.UUID
+	UserID                 pgtype.UUID
+	Channel                string
+	OriginalUrl            string
+	AffiliateUrl           string
+	TrackingCode           string
+	PolicyID               pgtype.UUID
+	ItemID                 pgtype.Text
+	CreatedAt              pgtype.Timestamptz
+	TierCode               pgtype.Text
+	MinShareBps            int32
+	MaxShareBps            int32
+	TrackingSubIds         []byte
+	ExpiresAt              pgtype.Timestamptz
+	PayoutFactor           pgtype.Numeric
+	EffectiveShareBps      pgtype.Int4
+	LifecycleStatus        pgtype.Text
+	CancellationNotifiedAt pgtype.Timestamptz
+	ProductName            pgtype.Text
 }
 
 type AppSetting struct {
@@ -62,14 +69,21 @@ type CashbackPolicy struct {
 	Mode            string
 	TrackingVersion pgtype.Int8
 	TaxBps          int32
+	PeriodMonths    int32
+	AnchorDate      pgtype.Date
+	DateBasis       string
 }
 
 type CashbackTier struct {
-	PolicyID          pgtype.UUID
-	TierCode          string
-	MinApprovedOrders int64
-	MinShareBps       int32
-	MaxShareBps       int32
+	PolicyID             pgtype.UUID
+	TierCode             string
+	MinApprovedOrders    pgtype.Int8
+	MinShareBps          int32
+	MaxShareBps          int32
+	NameVi               pgtype.Text
+	NameEn               pgtype.Text
+	MinGoldTotal         pgtype.Int8
+	ExchangeBonusPercent pgtype.Int4
 }
 
 type Checkin struct {
@@ -114,12 +128,15 @@ type DealLike struct {
 }
 
 type GiftCatalog struct {
-	ID      string
-	Name    string
-	Channel string
-	Cost    int64
-	Stock   int32
-	Active  bool
+	ID          string
+	Name        string
+	Channel     pgtype.Text
+	Cost        int64
+	Stock       int32
+	Active      bool
+	Icon        string
+	ImageUrl    string
+	Description string
 }
 
 type GiftRedemption struct {
@@ -133,6 +150,7 @@ type GiftRedemption struct {
 	CreatedAt     pgtype.Timestamptz
 	CostXu        pgtype.Int8
 	CostUnit      string
+	Currency      string
 }
 
 type IdempotencyRecord struct {
@@ -155,6 +173,7 @@ type ImportBatch struct {
 	Attempts   int32
 	Error      pgtype.Text
 	CreatedAt  pgtype.Timestamptz
+	FileID     pgtype.UUID
 }
 
 type ImportRow struct {
@@ -170,6 +189,26 @@ type InternalCredential struct {
 	Username     string
 	PasswordHash string
 	MustChange   bool
+}
+
+type LedgerReconciliationQueue struct {
+	AccountID pgtype.UUID
+	Revision  int64
+	UpdatedAt pgtype.Timestamptz
+}
+
+type LinkOperation struct {
+	UserID       pgtype.UUID
+	Key          string
+	PayloadHash  string
+	Status       string
+	Response     []byte
+	ErrorStatus  pgtype.Int4
+	ErrorCode    pgtype.Text
+	ErrorMessage pgtype.Text
+	LinkID       pgtype.UUID
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
 }
 
 type Notification struct {
@@ -195,31 +234,31 @@ type OauthRequest struct {
 }
 
 type Order struct {
-	ID               pgtype.UUID
-	UserID           pgtype.UUID
-	LinkID           pgtype.UUID
-	PolicyID         pgtype.UUID
-	Channel          string
-	Publisher        string
-	ExternalID       string
-	LineID           string
-	ProductName      string
-	Value            int64
-	Commission       int64
-	Cashback         int64
-	Status           string
-	OrderedAt        pgtype.Timestamptz
-	CreatedAt        pgtype.Timestamptz
-	SourceStatus     string
-	ApprovedAt       pgtype.Timestamptz
-	TierCode         pgtype.Text
-	ShareBps         int32
-	TrackingCode     pgtype.Text
-	TrackingSubIds   []byte
-	LinkCreatedAt    pgtype.Timestamptz
-	LinkExpiresAt    pgtype.Timestamptz
-	PromisedCashback pgtype.Int8
-	CashbackMode     string
+	ID                 pgtype.UUID
+	UserID             pgtype.UUID
+	LinkID             pgtype.UUID
+	PolicyID           pgtype.UUID
+	Channel            string
+	Publisher          string
+	ExternalID         string
+	LineID             string
+	ProductName        string
+	Value              int64
+	Commission         int64
+	Cashback           int64
+	Status             string
+	OrderedAt          pgtype.Timestamptz
+	CreatedAt          pgtype.Timestamptz
+	SourceStatus       string
+	ApprovedAt         pgtype.Timestamptz
+	TierCode           pgtype.Text
+	ShareBps           int32
+	TrackingCode       pgtype.Text
+	TrackingSubIds     []byte
+	LinkCreatedAt      pgtype.Timestamptz
+	LinkExpiresAt      pgtype.Timestamptz
+	CashbackMode       string
+	InternallyRejected bool
 }
 
 type OrderEvent struct {
@@ -256,6 +295,7 @@ type PrivateFile struct {
 	Path        string
 	ContentType string
 	CreatedAt   pgtype.Timestamptz
+	Lifecycle   string
 }
 
 type ProductCheck struct {
@@ -288,6 +328,26 @@ type Session struct {
 	ReauthenticatedAt pgtype.Timestamptz
 	CreatedAt         pgtype.Timestamptz
 	ExpiresAt         pgtype.Timestamptz
+}
+
+type ShopeeVerification struct {
+	ID                   pgtype.UUID
+	OriginKey            string
+	ConfigurationVersion string
+	Fingerprint          string
+	ProductUrl           string
+	Status               string
+	Stage                string
+	CreatedAt            pgtype.Timestamptz
+	ExpiresAt            pgtype.Timestamptz
+	FinishedAt           pgtype.Timestamptz
+	ErrorCode            pgtype.Text
+	ErrorMessage         pgtype.Text
+}
+
+type TrackingPublisher struct {
+	Publisher string
+	CreatedAt pgtype.Timestamptz
 }
 
 type User struct {
@@ -333,6 +393,47 @@ type WalletUnification struct {
 	ConvertedAt pgtype.Timestamptz
 }
 
+type WalletUserTotal struct {
+	UserID pgtype.UUID
+	// Current cashback sum of approved orders, including manual orders; excludes check-in rewards.
+	GoldTotal int64
+	// Gold spent in completed bank withdrawals and successful gold-to-green conversions; excludes green bonuses.
+	GoldUsed int64
+}
+
+type WeeklyPrizeAward struct {
+	ID             pgtype.UUID
+	CampaignID     pgtype.UUID
+	UserID         pgtype.UUID
+	UserName       string
+	Rank           int32
+	Xu             int64
+	Orders         int64
+	GiftSnapshot   []byte
+	Status         string
+	DeliveryCipher pgtype.Text
+	DeliveredBy    pgtype.UUID
+	DeliveredAt    pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
+}
+
+type WeeklyPrizeCampaign struct {
+	ID            pgtype.UUID
+	WeekStart     pgtype.Timestamptz
+	WeekEnd       pgtype.Timestamptz
+	GiftID        string
+	GiftSnapshot  []byte
+	Title         string
+	Description   string
+	Status        string
+	ReservedCount int32
+	Version       int32
+	CreatedBy     pgtype.UUID
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+	SettledAt     pgtype.Timestamptz
+}
+
 type Withdrawal struct {
 	ID            pgtype.UUID
 	UserID        pgtype.UUID
@@ -345,4 +446,12 @@ type Withdrawal struct {
 	EvidencePath  pgtype.Text
 	Reason        string
 	CreatedAt     pgtype.Timestamptz
+}
+
+type XuExchangePolicy struct {
+	ID         pgtype.UUID
+	GoldUnits  int64
+	GreenUnits int64
+	ActorID    pgtype.UUID
+	CreatedAt  pgtype.Timestamptz
 }

@@ -60,13 +60,11 @@ func TestTierMigrationPreservesLegacyMoney(t *testing.T) {
 	if cash != 5000 || balance != 5000 || bps != 5000 || minBps != 5000 || maxBps != 5000 || tier != nil {
 		t.Fatal(cash, balance, bps, minBps, maxBps, tier)
 	}
-	p, e := (&cashback.Service{Store: s}).Current(ctx)
-	if e != nil || len(p.Tiers) != 3 {
-		t.Fatal(p, e)
-	}
+	var tierCount int
+ if e=s.Pool.QueryRow(ctx,`SELECT count(*) FROM cashback_tiers`).Scan(&tierCount);e!=nil||tierCount!=3{t.Fatal(tierCount,e)}
 }
 
-func TestLegacyOrderSnapshotSurvivesPolicyChangesRetriesAndAdjustment(t *testing.T) {
+func TestLegacyOrderSnapshotSurvivesPolicyChangesAndRejectsAdjustment(t *testing.T) {
 	s, customer, admin := testStore(t)
 	ctx := context.Background()
 	policies := &cashback.Service{Store: s}
@@ -74,7 +72,7 @@ func TestLegacyOrderSnapshotSurvivesPolicyChangesRetriesAndAdjustment(t *testing
 	if e != nil {
 		t.Fatal(e)
 	}
-	initial := cashback.Input{CurrentVersionID: p.ID, Tiers: []cashback.Tier{{Code: "bronze", MinOrders: 0, Min: 2200, Max: 2700}, {Code: "platinum", MinOrders: 2, Min: 6000, Max: 7000}, {Code: "diamond", MinOrders: 4, Min: 8000, Max: 9000}}}
+	initial := periodFixtureInput(p.ID, []cashback.Tier{{Code: "bronze", MinGold: 0, Min: 2200, Max: 2700}, {Code: "platinum", MinGold: 2, Min: 6000, Max: 7000}, {Code: "diamond", MinGold: 4, Min: 8000, Max: 9000}}, 0)
 	if _, e = policies.Create(ctx, admin, "policy-initial", initial); e != nil {
 		t.Fatal(e)
 	}
@@ -97,21 +95,21 @@ func TestLegacyOrderSnapshotSurvivesPolicyChangesRetriesAndAdjustment(t *testing
 		t.Fatal(e)
 	}
 	m, e := cashback.MembershipFor(ctx, s.Queries, customer)
-	if e != nil || m.Code != "bronze" || m.ApprovedOrders != 0 {
+	if e != nil || m.Code != "member" || m.ApprovedOrders != 0 {
 		t.Fatal(m, e)
 	}
-	if _, e = s.Pool.Exec(ctx, `UPDATE orders SET status='approved',source_status='approved',approved_at=now() WHERE publisher='rank' AND external_id IN ('1','2')`); e != nil {
+	if _, e = s.Pool.Exec(ctx, `UPDATE orders SET status='approved',source_status='approved',cashback=1,approved_at=now() WHERE publisher='rank' AND external_id IN ('1','2')`); e != nil {
 		t.Fatal(e)
 	}
 	m, e = cashback.MembershipFor(ctx, s.Queries, customer)
-	if e != nil || m.Code != "platinum" {
+	if e != nil || m.Code != "gold" {
 		t.Fatal(m, e)
 	}
 	p, e = policies.Current(ctx)
 	if e != nil {
 		t.Fatal(e)
 	}
-	changed := cashback.Input{CurrentVersionID: p.ID, Tiers: []cashback.Tier{{Code: "bronze", MinOrders: 0, Min: 8000, Max: 9000}, {Code: "platinum", MinOrders: 2, Min: 8000, Max: 9000}, {Code: "diamond", MinOrders: 4, Min: 8000, Max: 9000}}}
+	changed := periodFixtureInput(p.ID, []cashback.Tier{{Code: "bronze", MinGold: 0, Min: 8000, Max: 9000}, {Code: "platinum", MinGold: 2, Min: 8000, Max: 9000}, {Code: "diamond", MinGold: 4, Min: 8000, Max: 9000}}, 0)
 	if _, e = policies.Create(ctx, admin, "policy-changed", changed); e != nil {
 		t.Fatal(e)
 	}
@@ -215,24 +213,24 @@ func TestLegacyOrderSnapshotSurvivesPolicyChangesRetriesAndAdjustment(t *testing
 			t.Fatal(e)
 		}
 	}
-	if _, e = events.Event(ctx, admin, id, "adjust-random", orders.Event{Action: "adjustment", Commission: 30001, Reason: "Corrected commission"}); e != nil {
+	if _, e = events.Event(ctx, admin, id, "adjust-random", orders.Event{Action: "adjustment", Reason: "Corrected commission"}); e == nil {
 		t.Fatal(e)
 	}
 	var balance int64
 	if e = s.Pool.QueryRow(ctx, `SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'`, customer).Scan(&balance); e != nil {
 		t.Fatal(e)
 	}
-	expected, _ = cashback.Amount(30001, bps)
+	expected, _ = cashback.Amount(20001, bps)
 	if balance != expected {
 		t.Fatal(balance, expected)
 	}
-	if _, e = events.Event(ctx, admin, id, "adjust-random-down", orders.Event{Action: "adjustment", Commission: 10001, Reason: "Reduced commission"}); e != nil {
+	if _, e = events.Event(ctx, admin, id, "adjust-random-down", orders.Event{Action: "adjustment", Reason: "Reduced commission"}); e == nil {
 		t.Fatal(e)
 	}
 	if e = s.Pool.QueryRow(ctx, `SELECT a.balance,o.share_bps FROM wallet_accounts a JOIN orders o ON o.user_id=a.user_id WHERE a.user_id=$1 AND a.kind='available' AND o.id=$2`, customer, id).Scan(&balance, &afterBps); e != nil {
 		t.Fatal(e)
 	}
-	expected, _ = cashback.Amount(10001, bps)
+	expected, _ = cashback.Amount(20001, bps)
 	if balance != expected || afterBps != bps {
 		t.Fatal(balance, afterBps)
 	}
@@ -252,7 +250,7 @@ func TestConcurrentPolicyEditsOnlyCommitOneVersion(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	input := cashback.Input{CurrentVersionID: p.ID, Tiers: []cashback.Tier{{Code: "bronze", Min: 1000, Max: 2000}, {Code: "platinum", MinOrders: 30, Min: 2000, Max: 3000}, {Code: "diamond", MinOrders: 100, Min: 3000, Max: 4000}}}
+	input := periodFixtureInput(p.ID, []cashback.Tier{{Code: "bronze", Min: 1000, Max: 2000}, {Code: "platinum", MinGold: 30, Min: 2000, Max: 3000}, {Code: "diamond", MinGold: 100, Min: 3000, Max: 4000}}, 0)
 	start := make(chan struct{})
 	results := make(chan error, 2)
 	var wg sync.WaitGroup
@@ -332,7 +330,7 @@ func TestCashbackPolicyAPIRequiresPermissionReauthAndPreservesOtherSettings(t *t
 	if e != nil {
 		t.Fatal(e)
 	}
-	input := cashback.Input{CurrentVersionID: p.ID, Tiers: []cashback.Tier{{Code: "bronze", Min: 5000, Max: 5500}, {Code: "platinum", MinOrders: 30, Min: 6000, Max: 7000}, {Code: "diamond", MinOrders: 100, Min: 8000, Max: 9000}}}
+	input := periodFixtureInput(p.ID, []cashback.Tier{{Code: "bronze", Min: 5000, Max: 5500}, {Code: "platinum", MinGold: 30, Min: 6000, Max: 7000}, {Code: "diamond", MinGold: 100, Min: 8000, Max: 9000}}, 0)
 	raw, _ := json.Marshal(input)
 	for _, tc := range []struct {
 		token, csrf string

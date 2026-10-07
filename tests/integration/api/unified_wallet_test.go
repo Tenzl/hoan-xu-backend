@@ -17,6 +17,10 @@ func assertLedger(t *testing.T, s *platform.Store) {
 	if e != nil || n != 0 {
 		t.Fatal("ledger mismatch", n, e)
 	}
+	e = s.Pool.QueryRow(context.Background(), `SELECT count(*) FROM (SELECT e.transaction_id FROM wallet_entries e JOIN wallet_accounts a ON a.id=e.account_id GROUP BY e.transaction_id,CASE WHEN a.kind LIKE 'green_%' THEN 'green' ELSE 'gold' END HAVING sum(e.amount)<>0) d`).Scan(&n)
+	if e != nil || n != 0 {
+		t.Fatal("currency ledger mismatch", n, e)
+	}
 }
 func TestUnifiedMigrationPreservesPendingGiftsAndDebtAndIsRepeatable(t *testing.T) {
 	s, u, _ := testStoreWithTiers(t, false)
@@ -58,6 +62,16 @@ func TestUnifiedMigrationPreservesPendingGiftsAndDebtAndIsRepeatable(t *testing.
 		t.Fatal(a, h, d, c, streak, e)
 	}
 	assertLedger(t, s)
+	// Apply the later split only after validating the historical migration.
+	for _, name := range []string{"000024_dual_xu", "000025_dual_xu_seed"} {
+		raw, e := os.ReadFile("../../database/migrations/" + name + ".up.sql")
+		if e != nil {
+			t.Fatal(e)
+		}
+		if _, e = s.Pool.Exec(ctx, string(raw)); e != nil {
+			t.Fatal(e)
+		}
+	}
 	// The converted reservation is returned once and remains backed by the ledger.
 	r := &rewards.Service{Store: s}
 	var actor string
@@ -139,7 +153,7 @@ func TestWithdrawAndGiftRaceCannotOverspend(t *testing.T) {
 	}
 	assertLedger(t, s)
 }
-func TestCheckinCreditsWalletAndRepaysDebt(t *testing.T) {
+func TestCheckinCreditsGreenWithoutRepayingGoldDebt(t *testing.T) {
 	s, u, _ := testStore(t)
 	ctx := context.Background()
 	tx, e := s.Pool.Begin(ctx)
@@ -156,7 +170,7 @@ func TestCheckinCreditsWalletAndRepaysDebt(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if v.(map[string]any)["awardXu"] != 300 || v.(map[string]any)["available"] != int64(200) {
+	if v.(map[string]any)["awardXu"] != 300 || v.(map[string]any)["available"] != int64(0) || v.(map[string]any)["greenAvailable"] != int64(300) {
 		t.Fatal(v)
 	}
 	if _, e = (&rewards.Service{Store: s}).Exchange(ctx, u, "legacy-exchange", 10); e == nil {
