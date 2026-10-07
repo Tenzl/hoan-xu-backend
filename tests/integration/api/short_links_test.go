@@ -46,7 +46,7 @@ func TestCustomerTrackingIsStableAcrossShopeeLinksAndIsolatedBetweenCustomers(t 
 		t.Fatal(err)
 	}
 	f := &offerLinkFixture{}
-	aff := &affiliate.Service{Store: s, Enabled: true, TrackingVerified: true, LinkGenerator: f}
+	aff := &affiliate.Service{Store: s, Enabled: true, TrackingVerified: true, ProductLookup: verifiedLinkProduct, LinkGenerator: f}
 	seen := map[string]bool{}
 	for _, tc := range []struct{ user, code string }{{customer, customerCode}, {customer, customerCode}, {other, otherCode}} {
 		result, err := aff.CreateLink(ctx, tc.user, "https://shopee.vn/product/83496725/6939920023")
@@ -76,7 +76,7 @@ func TestCreateLinkPersistsSignedSnapshotWithoutCreatingOrders(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := &offerLinkFixture{}
-	aff := &affiliate.Service{Store: s, Enabled: true, TrackingVerified: true, LinkGenerator: f}
+	aff := &affiliate.Service{Store: s, Enabled: true, TrackingVerified: true, ProductLookup: verifiedLinkProduct, LinkGenerator: f}
 	result, err := aff.CreateLink(ctx, customer, "https://shopee.vn/product/83496725/6939920023")
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ func TestCreateLinkPersistsSignedSnapshotWithoutCreatingOrders(t *testing.T) {
 	if e := s.Pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM affiliate_links)+(SELECT count(*) FROM orders)`).Scan(&count); e != nil || count != 1 {
 		t.Fatal("generation must save one link only", count, e)
 	}
-	if l["id"] == nil || l["status"] != "active" || l["canDelete"] != true || l["affiliateUrl"] != "https://s.shopee.vn/3B7ybQjO2E" || l["payoutFactor"] == nil || l["expiresAt"] == nil || len(f.ids[2]) != 49 || f.ids[3] == "" || len(f.ids[4]) != 32 {
+	if l["id"] == nil || l["status"] != "active" || l["canDelete"] != false || l["affiliateUrl"] != "https://s.shopee.vn/3B7ybQjO2E" || l["payoutFactor"] == nil || l["expiresAt"] == nil || len(f.ids[2]) != 49 || f.ids[3] == "" || len(f.ids[4]) != 32 {
 		t.Fatal(l, f.ids)
 	}
 	f.err = errors.New("SHOPEE_UPSTREAM_FAILED")
@@ -133,12 +133,13 @@ func TestSavedLinkHTTPReturns200AndDatabaseID(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	handler := New(&Server{Store: s, Auth: a, Affiliate: &affiliate.Service{Store: s, Enabled: true, TrackingVerified: true, LinkGenerator: &offerLinkFixture{}}, Origin: "http://localhost:3000", PrivateDir: t.TempDir()})
+	handler := New(&Server{Store: s, Auth: a, Affiliate: &affiliate.Service{Store: s, Enabled: true, TrackingVerified: true, ProductLookup: verifiedLinkProduct, LinkGenerator: &offerLinkFixture{}}, Origin: "http://localhost:3000", PrivateDir: t.TempDir()})
 	for i := 0; i < 5; i++ {
 		r := httptest.NewRequest("POST", "/api/v1/affiliate-links", strings.NewReader(`{"url":"https://shopee.vn/product/83496725/6939920023"}`))
 		r.AddCookie(&http.Cookie{Name: "hx_session", Value: token})
 		r.Header.Set("Origin", "http://localhost:3000")
 		r.Header.Set("X-CSRF-Token", u.CSRF)
+		r.Header.Set("Idempotency-Key", platform.Token())
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, r)
 		if w.Code != 200 {

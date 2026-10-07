@@ -48,7 +48,7 @@ func TestV1OrdersRetainSevenDaysWhileV2ExpiresAfterSix(t *testing.T) {
 	}
 }
 
-func TestRejectedOnlyLinksDeleteWithoutRemovingOrdersOrNotifyingProgress(t *testing.T) {
+func TestRejectedOnlyLinksRemainWithoutRemovingOrdersOrNotifyingProgress(t *testing.T) {
 	s, user, admin := testStore(t)
 	ctx := context.Background()
 	created := time.Now().UTC().Add(-7 * 24 * time.Hour).Truncate(time.Second)
@@ -65,11 +65,11 @@ func TestRejectedOnlyLinksDeleteWithoutRemovingOrdersOrNotifyingProgress(t *test
 	row.Status = "rejected"
 	importRows(t, s, admin, []imports.Row{row})
 	got := linkState(t, s, id)
-	if got["status"] != "cancelled" || got["canDelete"] != true {
+	if got["status"] != "cancelled" || got["canDelete"] != false {
 		t.Fatal(got)
 	}
-	if e := svc.DeleteLink(ctx, user, id); e != nil {
-		t.Fatal(e)
+	if e := svc.DeleteLink(ctx, user, id); e == nil {
+		t.Fatal("rejected link was deleted")
 	}
 	var status string
 	var cashback int64

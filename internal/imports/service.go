@@ -14,6 +14,9 @@ import (
 type Service struct{ Store *platform.Store }
 
 func (s *Service) Preview(ctx context.Context, actor, filename, hash string, mapping map[string]string, rows []Row) (any, error) {
+	return s.PreviewFile(ctx, actor, filename, hash, "", mapping, rows)
+}
+func (s *Service) PreviewFile(ctx context.Context, actor, filename, hash, fileID string, mapping map[string]string, rows []Row) (any, error) {
 	tx, e := s.Store.Pool.Begin(ctx)
 	if e != nil {
 		return nil, e
@@ -21,11 +24,26 @@ func (s *Service) Preview(ctx context.Context, actor, filename, hash string, map
 	defer tx.Rollback(ctx)
 	var id string
 	m, _ := json.Marshal(mapping)
-	e = tx.QueryRow(ctx, `INSERT INTO import_batches(actor_id,filename,file_hash,mapping) VALUES($1,$2,$3,$4) RETURNING id::text`, actor, filename, hash, m).Scan(&id)
+	if fileID != "" {
+		var matched bool
+		if e = tx.QueryRow(ctx, `UPDATE private_files SET lifecycle='attached' WHERE id=$1 AND owner_id=$2 AND purpose='csv' AND lifecycle='staged' RETURNING true`, fileID, actor).Scan(&matched); e != nil {
+			return nil, e
+		}
+	}
+	e = tx.QueryRow(ctx, `INSERT INTO import_batches(actor_id,filename,file_hash,mapping,file_id) VALUES($1,$2,$3,$4,nullif($5,'')::uuid) RETURNING id::text`, actor, filename, hash, m, fileID).Scan(&id)
 	if e != nil {
 		return nil, e
 	}
 	counts := map[string]int{"valid": 0, "invalid": 0, "unmatched": 0, "ignored": 0}
+	insertRows := make([][]any, 0, min(len(rows), 1000))
+	flush := func() error {
+		if len(insertRows) == 0 {
+			return nil
+		}
+		_, err := tx.CopyFrom(ctx, pgx.Identifier{"import_rows"}, []string{"batch_id", "row_number", "payload", "status", "error"}, pgx.CopyFromRows(insertRows))
+		insertRows = insertRows[:0]
+		return err
+	}
 	for i, row := range rows {
 		status, err := validateRow(ctx, tx, s.Store, &row)
 		if err != nil {
@@ -33,9 +51,19 @@ func (s *Service) Preview(ctx context.Context, actor, filename, hash string, map
 		}
 		counts[status]++
 		b, _ := json.Marshal(row)
-		if _, e = tx.Exec(ctx, `INSERT INTO import_rows VALUES($1,$2,$3,$4,nullif($5,''))`, id, i+1, b, status, row.Error); e != nil {
-			return nil, e
+		var rowError any
+		if row.Error != "" {
+			rowError = row.Error
 		}
+		insertRows = append(insertRows, []any{id, i + 1, json.RawMessage(b), status, rowError})
+		if len(insertRows) == 1000 {
+			if e = flush(); e != nil {
+				return nil, e
+			}
+		}
+	}
+	if e = flush(); e != nil {
+		return nil, e
 	}
 	if e = platform.Audit(ctx, tx, actor, "import_preview", id, counts); e != nil {
 		return nil, e
@@ -141,7 +169,24 @@ func (s *Service) applyOne(ctx context.Context, batch string) (bool, error) {
 		return false, e
 	}
 	status := "applied"
-	validation, err := validateRow(ctx, tx, s.Store, &row)
+	var a Attribution
+	var validation string
+	var err error
+	if row.NativeShopee {
+		validation = "valid"
+		a, err = Attribute(ctx, tx, s.Store, &row)
+		if err != nil {
+			var invalid *Ineligible
+			if !errors.As(err, &invalid) {
+				return false, err
+			}
+			row.Error = err.Error()
+			validation = "ignored"
+			err = nil
+		}
+	} else {
+		validation, err = validateRow(ctx, tx, s.Store, &row)
+	}
 	if err != nil {
 		return false, err
 	}
@@ -149,10 +194,6 @@ func (s *Service) applyOne(ctx context.Context, batch string) (bool, error) {
 		status = validation
 	} else {
 		if row.NativeShopee {
-			a, err := Attribute(ctx, tx, s.Store, &row)
-			if err != nil {
-				return false, err
-			}
 			if e = platform.LockTracking(ctx, tx, a.User, row.Tracking); e != nil {
 				return false, e
 			}
@@ -163,7 +204,8 @@ func (s *Service) applyOne(ctx context.Context, batch string) (bool, error) {
 		var oldStatus, mode, trackingCode string
 		var oldCommission, oldValue int64
 		var oldBps int
-		e = tx.QueryRow(ctx, `SELECT status,commission,value,share_bps,cashback_mode,coalesce(tracking_code,'') FROM orders WHERE channel=$1 AND publisher=$2 AND external_id=$3 AND line_id=$4 FOR UPDATE`, row.Channel, row.Publisher, row.OrderID, row.LineID).Scan(&oldStatus, &oldCommission, &oldValue, &oldBps, &mode, &trackingCode)
+		var internalRejection bool
+		e = tx.QueryRow(ctx, `SELECT status,commission,value,share_bps,cashback_mode,coalesce(tracking_code,''),internally_rejected FROM orders WHERE channel=$1 AND publisher=$2 AND external_id=$3 AND line_id=$4 FOR UPDATE`, row.Channel, row.Publisher, row.OrderID, row.LineID).Scan(&oldStatus, &oldCommission, &oldValue, &oldBps, &mode, &trackingCode, &internalRejection)
 		if e == nil {
 			if trackingCode != "" && trackingCode != row.Tracking {
 				status = "ignored"
@@ -183,6 +225,9 @@ func (s *Service) applyOne(ctx context.Context, batch string) (bool, error) {
 						return false, er
 					}
 					next := "pending"
+					if internalRejection {
+						next = "rejected"
+					}
 					if row.Status == "rejected" {
 						cash = 0
 						next = "rejected"
@@ -195,7 +240,7 @@ func (s *Service) applyOne(ctx context.Context, batch string) (bool, error) {
 				}
 			}
 		} else if errors.Is(e, pgx.ErrNoRows) {
-			_, _, e = InsertSignedOrder(ctx, tx, s.Store, &row)
+			_, _, e = InsertAttributedOrder(ctx, tx, &row, a)
 			if e != nil {
 				return false, e
 			}

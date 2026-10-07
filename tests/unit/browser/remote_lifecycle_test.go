@@ -253,12 +253,34 @@ func TestRemoteLifecycleCaptureAndRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	pages := 0
-	for _, info := range targets {
-		if info.Type == "page" {
-			pages++
+	// CloseTarget acknowledges before Chrome has finished destroying a page.
+	// Allow that bounded asynchronous cleanup, but still reject persistent leaks.
+	cleanupDeadline := time.Now().Add(5 * time.Second)
+	for {
+		pages = 0
+		for _, info := range targets {
+			if info.Type == "page" {
+				pages++
+			}
+		}
+		if pages == 4 || time.Now().After(cleanupDeadline) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+		targets, err = chromedp.Targets(m.root)
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
 	if pages != 4 {
+		for _, info := range targets {
+			if info.Type == "page" {
+				t.Logf("remaining page %s %s", info.TargetID, info.URL)
+			}
+		}
+		m.mu.Lock()
+		t.Logf("owned pages: %v", m.ownedTargets)
+		m.mu.Unlock()
 		t.Fatal("tunnel reconnect leaked controller/worker tabs or closed the native tab", pages)
 	}
 	if m.SessionVersion() <= oldVersion {

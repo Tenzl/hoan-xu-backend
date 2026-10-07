@@ -31,6 +31,14 @@ func (s *Service) SavePublisher(ctx context.Context, actor, id string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `INSERT INTO tracking_publishers(publisher) SELECT settings->>'publisher' FROM affiliate_channels WHERE id='shopee' AND coalesce(settings->>'publisher','')<>'' ON CONFLICT DO NOTHING`); err != nil {
+		return err
+	}
+	if id != "" {
+		if _, err = tx.Exec(ctx, `INSERT INTO tracking_publishers(publisher) VALUES($1) ON CONFLICT DO NOTHING`, id); err != nil {
+			return err
+		}
+	}
 	tag, err := tx.Exec(ctx, `UPDATE affiliate_channels SET settings=jsonb_set(settings,'{publisher}',to_jsonb($1::text),true) WHERE id='shopee'`, id)
 	if err != nil {
 		return err

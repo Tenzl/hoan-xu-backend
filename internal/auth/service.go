@@ -46,13 +46,20 @@ func (s *Service) ConfigureGoogle(ctx context.Context, client, secret, callback 
 }
 func (s *Service) Session(ctx context.Context, token string) (*User, error) {
 	u := &User{Permissions: []string{}}
-	e := s.Store.Pool.QueryRow(ctx, `SELECT u.id::text,u.name,u.email,u.role,u.blocked,u.tracking_code,coalesce(c.must_change,false),s.id::text,s.csrf_token,coalesce(s.reauthenticated_at>now()-interval '15 minutes',false) FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN internal_credentials c ON c.user_id=u.id WHERE s.token_hash=$1 AND s.expires_at>now()`, platform.Hash(token)).Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Blocked, &u.Tracking, &u.MustChange, &u.SessionID, &u.CSRF, &u.Recent)
+	e := s.Store.Pool.QueryRow(ctx, `SELECT u.id::text,u.name,u.email,u.role,u.blocked,u.tracking_code,coalesce(c.must_change,false),s.id::text,s.csrf_token,coalesce(s.reauthenticated_at>now()-interval '15 minutes',false),ARRAY(SELECT permission FROM user_permissions WHERE user_id=u.id ORDER BY permission) FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN internal_credentials c ON c.user_id=u.id WHERE s.token_hash=$1 AND s.expires_at>now()`, platform.Hash(token)).Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Blocked, &u.Tracking, &u.MustChange, &u.SessionID, &u.CSRF, &u.Recent, &u.Permissions)
 	if e != nil || u.Blocked {
 		return nil, platform.Fail(401, "UNAUTHENTICATED", "Vui lòng đăng nhập.")
 	}
+	return u, nil
+}
+
+// Profile loads sensitive fields only for the account endpoint.
+func (s *Service) Profile(ctx context.Context, principal *User) (*User, error) {
+	copy := *principal
+	u := &copy
 	if u.Role == "customer" {
 		var encrypted *string
-		if e = s.Store.Pool.QueryRow(ctx, `SELECT bank_details FROM users WHERE id=$1`, u.ID).Scan(&encrypted); e != nil {
+		if e := s.Store.Pool.QueryRow(ctx, `SELECT bank_details FROM users WHERE id=$1`, u.ID).Scan(&encrypted); e != nil {
 			return nil, e
 		}
 		if encrypted != nil {
@@ -61,24 +68,12 @@ func (s *Service) Session(ctx context.Context, token string) (*User, error) {
 				return nil, err
 			}
 			u.BankDetails = &users.BankDetails{}
-			if e = json.Unmarshal([]byte(plain), u.BankDetails); e != nil {
+			if e := json.Unmarshal([]byte(plain), u.BankDetails); e != nil {
 				return nil, e
 			}
 		}
 	}
-	rows, e := s.Store.Pool.Query(ctx, `SELECT permission FROM user_permissions WHERE user_id=$1`, u.ID)
-	if e != nil {
-		return nil, e
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var p string
-		if e = rows.Scan(&p); e != nil {
-			return nil, e
-		}
-		u.Permissions = append(u.Permissions, p)
-	}
-	return u, rows.Err()
+	return u, nil
 }
 func (u *User) Can(permission string) bool {
 	if u.Role == "admin" {

@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 	"hoanxu/internal/auth"
+	"hoanxu/internal/envguard"
 	"hoanxu/internal/platform"
 	"os"
 	"path/filepath"
@@ -22,6 +23,9 @@ func main() {
 	envFile := os.Getenv("ENV_FILE")
 	if envFile == "" {
 		envFile = ".env"
+		if _, err := os.Stat(".env.local"); err == nil {
+			envFile = ".env.local"
+		}
 	}
 	_ = godotenv.Load(envFile)
 	if e := run(); e != nil {
@@ -34,6 +38,15 @@ func run() error {
 		return errors.New("commands: migrate, create, reset, shopee-login, import-shopee-settings, verify-shopee-settings, key, import-legacy")
 	}
 	command := os.Args[1]
+	if command == "clone-local" {
+		return cloneLocal(os.Args[2:])
+	}
+	if command == "verify-local" {
+		return verifyLocal(os.Args[2:])
+	}
+	if command == "check-local-history" {
+		return checkLocalHistory(os.Args[2:])
+	}
 	if command == "verify-shopee-settings" {
 		return verifyShopeeSettings(os.Args[2:])
 	}
@@ -52,6 +65,11 @@ func run() error {
 		return nil
 	}
 	if command == "migrate" {
+		fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
+		allowProduction := fs.Bool("allow-production", false, "explicit production migration authorization")
+		if e := fs.Parse(os.Args[2:]); e != nil {
+			return e
+		}
 		root, e := filepath.Abs("database/migrations")
 		if e != nil {
 			return e
@@ -60,6 +78,15 @@ func run() error {
 		connection := os.Getenv("MIGRATION_DATABASE_URL")
 		if connection == "" {
 			connection = os.Getenv("DATABASE_URL")
+		}
+		if e := envguard.Validate(connection, os.Getenv("APP_ENV")); e != nil {
+			return e
+		}
+		if os.Getenv("APP_ENV") != "development" && os.Getenv("APP_ENV") != "test" && !*allowProduction {
+			return errors.New("production migration requires an explicit ENV_FILE and --allow-production")
+		}
+		if *allowProduction && os.Getenv("ENV_FILE") == "" {
+			return errors.New("set ENV_FILE explicitly for a production migration")
 		}
 		m, e := migrate.New(source, connection)
 		if e != nil {

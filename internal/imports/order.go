@@ -26,6 +26,10 @@ func InsertSignedOrder(ctx context.Context, tx pgx.Tx, s *platform.Store, row *R
 	if e != nil {
 		return "", 0, e
 	}
+	return InsertAttributedOrder(ctx, tx, row, a)
+}
+func InsertAttributedOrder(ctx context.Context, tx pgx.Tx, row *Row, a Attribution) (string, int64, error) {
+	var e error
 	if e = platform.LockTracking(ctx, tx, a.User, row.Tracking); e != nil {
 		return "", 0, e
 	}

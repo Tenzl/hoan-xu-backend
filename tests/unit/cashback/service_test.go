@@ -1,12 +1,11 @@
 package cashback
 
 import (
-	"bytes"
 	"encoding/json"
 	"testing"
 )
 
-func TestPercentAndSampling(t *testing.T) {
+func TestPercentAndAmount(t *testing.T) {
 	for _, raw := range []string{"50", "50.01", "0", "100.00"} {
 		var p Percent
 		if e := json.Unmarshal([]byte(raw), &p); e != nil {
@@ -23,19 +22,6 @@ func TestPercentAndSampling(t *testing.T) {
 		if json.Unmarshal([]byte(raw), &p) == nil {
 			t.Fatal("accepted", raw)
 		}
-	}
-	for _, tc := range []struct {
-		b    byte
-		want int
-	}{{0, 5000}, {2, 5002}} {
-		n, e := Sample(bytes.NewReader([]byte{tc.b}), 5000, 5002)
-		if e != nil || n != tc.want {
-			t.Fatal(n, e)
-		}
-	}
-	n, e := Sample(bytes.NewReader(nil), 1234, 1234)
-	if e != nil || n != 1234 {
-		t.Fatal(n, e)
 	}
 	a, e := Amount(999, 3333)
 	if e != nil || a != 332 {

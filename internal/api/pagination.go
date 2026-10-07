@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"hoanxu/internal/platform"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -21,6 +23,7 @@ type paging struct {
 }
 
 var cursorRoutes = map[string]paging{
+	"/api/v1/me/purchases":        {"p.sort_at,p.id", "sortAt", 1},
 	"/api/v1/orders":              {"o.ordered_at,o.id", "orderedAt", 1},
 	"/api/v1/affiliate-links":     {"l.created_at,l.id", "createdAt", 1},
 	"/api/v1/coins/transactions":  {"created_at,id", "createdAt", 1},
@@ -30,10 +33,31 @@ var cursorRoutes = map[string]paging{
 	"/api/v1/withdrawals":         {"w.created_at,w.id", "createdAt", 1},
 	"/api/v1/gift-redemptions":    {"r.created_at,r.id", "createdAt", 1},
 }
+var offsetLimit = regexp.MustCompile(` LIMIT \$(\d+) OFFSET \$\d+`)
 
 func (s *Server) pageRows(r *http.Request, q string, args ...any) ([]json.RawMessage, error) {
 	p, ok := cursorRoutes[r.URL.Path]
 	if !ok {
+		if match := offsetLimit.FindStringSubmatch(q); len(match) == 2 {
+			index, _ := strconv.Atoi(match[1])
+			index--
+			if index >= 0 && index < len(args) {
+				if limit, valid := args[index].(int); valid {
+					params := append([]any{}, args...)
+					params[index] = limit + 1
+					rows, e := s.Store.Rows(r.Context(), q, params...)
+					if e != nil {
+						return nil, e
+					}
+					hasNext := len(rows) > limit
+					if hasNext {
+						rows = rows[:limit]
+					}
+					*r = *r.WithContext(context.WithValue(r.Context(), contextKey("pagination"), map[string]any{"hasNext": hasNext}))
+					return rows, nil
+				}
+			}
+		}
 		return s.Store.Rows(r.Context(), q, args...)
 	}
 	params := append([]any{}, args...)

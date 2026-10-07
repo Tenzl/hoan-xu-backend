@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"hoanxu/internal/envguard"
 	"hoanxu/internal/legacyimport"
 )
 
@@ -33,6 +34,9 @@ func importLegacy(args []string) error {
 	}
 	summary := plan.Summary()
 	if *apply {
+		if err := envguard.SeedAllowed(os.Getenv("DATABASE_URL"), os.Getenv("APP_ENV")); err != nil {
+			return err
+		}
 		if os.Getenv("DATABASE_URL") == "" {
 			return fmt.Errorf("DATABASE_URL is required for --apply")
 		}

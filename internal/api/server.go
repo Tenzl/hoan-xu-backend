@@ -20,7 +20,6 @@ import (
 	"hoanxu/internal/wallet"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -35,6 +34,7 @@ type Server struct {
 	RemoteBrowser      *remotebrowser.Service
 	LocalBrowser       bool
 	Origin, PrivateDir string
+	ProxySigningKey    string
 	Secure             bool
 	Mux                *chi.Mux
 	PrepareBrowser     func(shopeeconfig.Config) (func(), error)
@@ -114,8 +114,16 @@ func (s *Server) security(next http.Handler) http.Handler {
 				return
 			}
 		}
-		ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-		if e := s.Store.Limit(r.Context(), "api:"+ip, 240); e != nil {
+		identity := "ip:" + clientIP(r, s.ProxySigningKey, time.Now())
+		if s.Auth != nil {
+			if c, err := r.Cookie("hx_session"); err == nil {
+				if u, err := s.Auth.Session(r.Context(), c.Value); err == nil {
+					r = r.WithContext(context.WithValue(r.Context(), contextKey("user"), u))
+					identity = "user:" + u.ID
+				}
+			}
+		}
+		if e := s.Store.Limit(r.Context(), "api:"+identity, 240); e != nil {
 			s.reply(w, r, 0, nil, e)
 			return
 		}
@@ -133,7 +141,10 @@ func (s *Server) protected(next http.Handler) http.Handler {
 			s.reply(w, r, 0, nil, platform.Fail(401, "UNAUTHENTICATED", "Vui lòng đăng nhập."))
 			return
 		}
-		u, e := s.Auth.Session(r.Context(), c.Value)
+		u := user(r)
+		if u == nil {
+			u, e = s.Auth.Session(r.Context(), c.Value)
+		}
 		if e != nil {
 			s.reply(w, r, 0, nil, e)
 			return
@@ -279,7 +290,7 @@ func New(s *Server) *chi.Mux {
 			if !s.body(w, r, &p) {
 				return
 			}
-			ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+			ip := clientIP(r, s.ProxySigningKey, time.Now())
 			if e := s.Store.Limit(r.Context(), "login:"+ip, 10); e != nil {
 				s.reply(w, r, 0, nil, e)
 				return
@@ -305,7 +316,10 @@ func New(s *Server) *chi.Mux {
 		r.Post("/shopee/check", s.check)
 		r.Group(func(r chi.Router) {
 			r.Use(s.protected)
-			r.Get("/me", func(w http.ResponseWriter, r *http.Request) { s.reply(w, r, 200, user(r), nil) })
+			r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
+				u, e := s.Auth.Profile(r.Context(), user(r))
+				s.reply(w, r, 200, u, e)
+			})
 			r.Patch("/me", func(w http.ResponseWriter, r *http.Request) {
 				var p users.ProfileInput
 				if !s.body(w, r, &p) {
@@ -367,12 +381,10 @@ func (s *Server) check(w http.ResponseWriter, r *http.Request) {
 	if !s.body(w, r, &p) {
 		return
 	}
-	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	ip := clientIP(r, s.ProxySigningKey, time.Now())
 	key, max := "checker:"+ip, 10
-	if c, e := r.Cookie("hx_session"); e == nil {
-		if u, e := s.Auth.Session(r.Context(), c.Value); e == nil {
-			key, max = "checker:"+u.ID, 30
-		}
+	if u := user(r); u != nil {
+		key, max = "checker:"+u.ID, 30
 	}
 	e := s.Store.Limit(r.Context(), key, max)
 	var data any
@@ -387,6 +399,7 @@ func (s *Server) customerRoutes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(s.customer)
 		r.Get("/me/dashboard", s.dashboard)
+		r.Get("/me/purchases", s.purchases)
 		r.Get("/me/leaderboard", s.myLeaderboard)
 		r.Get("/wallet", func(w http.ResponseWriter, r *http.Request) {
 			s.one(w, r, `SELECT jsonb_build_object('available',coalesce(max(balance) FILTER(WHERE kind='available'),0),'held',coalesce(max(balance) FILTER(WHERE kind='held'),0),'debt',coalesce(max(balance) FILTER(WHERE kind='debt'),0),'giftHeld',coalesce(max(balance) FILTER(WHERE kind='gift_held'),0),'unit','xu') FROM wallet_accounts WHERE user_id=$1`, user(r).ID)
@@ -432,7 +445,7 @@ func (s *Server) customerRoutes(r chi.Router) {
 			e := s.Store.Limit(r.Context(), "link:"+user(r).ID, 30)
 			var v any
 			if e == nil {
-				v, e = s.Affiliate.CreateLink(r.Context(), user(r).ID, p.URL)
+				v, e = s.Affiliate.CreateLinkOperation(r.Context(), user(r).ID, r.Header.Get("Idempotency-Key"), p.URL)
 			}
 			s.reply(w, r, 200, v, e)
 		})
@@ -469,12 +482,13 @@ func (s *Server) customerRoutes(r chi.Router) {
 		r.Get("/gift-redemptions", s.redemptionList(false))
 		r.Post("/gift-redemptions", func(w http.ResponseWriter, r *http.Request) {
 			var p struct {
-				GiftID string `json:"giftId"`
+				GiftID         string `json:"giftId"`
+				ExpectedCostXu *int64 `json:"expectedCostXu"`
 			}
 			if !s.body(w, r, &p) {
 				return
 			}
-			v, e := (&rewards.Service{Store: s.Store}).Redeem(r.Context(), user(r).ID, r.Header.Get("Idempotency-Key"), p.GiftID)
+			v, e := (&rewards.Service{Store: s.Store}).RedeemQuoted(r.Context(), user(r).ID, r.Header.Get("Idempotency-Key"), p.GiftID, p.ExpectedCostXu)
 			s.reply(w, r, 201, v, e)
 		})
 		r.Post("/deals", func(w http.ResponseWriter, r *http.Request) {
@@ -509,7 +523,7 @@ func (s *Server) customerRoutes(r chi.Router) {
 	})
 }
 
-const orderSQL = `SELECT jsonb_build_object('id',o.id,'userId',o.user_id,'name',u.name,'channel',o.channel,'productName',o.product_name,'value',o.value,'commission',o.commission,'cashback',o.cashback,'status',o.status,'sourceStatus',o.source_status,'orderedAt',o.ordered_at,'externalId',o.external_id,'lineId',o.line_id,'publisher',o.publisher,'policyId',o.policy_id,'tierCode',o.tier_code,'sharePercent',o.share_bps::numeric/100) FROM orders o JOIN users u ON u.id=o.user_id`
+const orderSQL = `SELECT jsonb_build_object('id',o.id,'userId',o.user_id,'name',u.name,'channel',o.channel,'productName',o.product_name,'value',o.value,'commission',o.commission,'cashback',o.cashback,'status',o.status,'sourceStatus',o.source_status,'internallyRejected',o.internally_rejected,'orderedAt',o.ordered_at,'externalId',o.external_id,'lineId',o.line_id,'publisher',o.publisher,'policyId',o.policy_id,'tierCode',o.tier_code,'sharePercent',o.share_bps::numeric/100) FROM orders o JOIN users u ON u.id=o.user_id`
 
 func (s *Server) like(like bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

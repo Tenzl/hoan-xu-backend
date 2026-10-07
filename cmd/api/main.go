@@ -2,16 +2,20 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 	"hoanxu/internal/affiliate"
 	"hoanxu/internal/api"
 	"hoanxu/internal/auth"
+	"hoanxu/internal/envguard"
 	"hoanxu/internal/imports"
 	"hoanxu/internal/platform"
+	"hoanxu/internal/privatefiles"
 	"hoanxu/internal/remotebrowser"
 	"hoanxu/internal/shopeeconfig"
+	"hoanxu/internal/wallet"
 	"log/slog"
 	"net/http"
 	"os"
@@ -24,7 +28,14 @@ import (
 )
 
 func main() {
-	_ = godotenv.Load(env("ENV_FILE", ".env"))
+	profile := os.Getenv("ENV_FILE")
+	if profile == "" {
+		profile = ".env"
+		if _, err := os.Stat(".env.local"); err == nil {
+			profile = ".env.local"
+		}
+	}
+	_ = godotenv.Load(profile)
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	if e := run(); e != nil {
 		slog.Error("startup_failed", "error", e)
@@ -37,6 +48,21 @@ func run() error {
 	databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	if databaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required; set it in the service environment before starting the API")
+	}
+	if err := envguard.Validate(databaseURL, os.Getenv("APP_ENV")); err != nil {
+		return err
+	}
+	connection, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return err
+	}
+	slog.Info("database_target", "environment", env("APP_ENV", "production"), "host", connection.ConnConfig.Host, "database", connection.ConnConfig.Database)
+	proxyKey := os.Getenv("PROXY_SIGNING_KEY")
+	if proxyKey != "" {
+		secret, err := hex.DecodeString(proxyKey)
+		if err != nil || len(secret) != 32 {
+			return fmt.Errorf("PROXY_SIGNING_KEY must contain 64 hexadecimal characters")
+		}
 	}
 	pool, e := pgxpool.New(ctx, databaseURL)
 	if e != nil {
@@ -76,11 +102,13 @@ func run() error {
 	go func() { b.Run(initialCtx); close(initialDone) }()
 	defer func() { runtimeMu.Lock(); defer runtimeMu.Unlock(); browserStop(); <-browserDone }()
 	aff := &affiliate.Service{Store: store, Browser: b, ManagedConfig: true, Enabled: cfg.Enabled, TrackingVerified: cfg.TrackingVerified, SchemaVerified: cfg.SchemaVerified, PriceScale: cfg.PriceScale}
+	aff.Lifetime = ctx
 	private, e := filepath.Abs(env("PRIVATE_DIR", "private-data/files"))
 	if e != nil {
 		return e
 	}
 	server := &api.Server{Store: store, Auth: a, Affiliate: aff, Origin: env("APP_ORIGIN", "http://localhost:3000"), Secure: os.Getenv("COOKIE_SECURE") == "true", PrivateDir: private}
+	server.ProxySigningKey = proxyKey
 	defer server.WaitVerifications()
 	if os.Getenv("REMOTE_BROWSER_ENABLED") == "true" {
 		bridgePassword := os.Getenv("REMOTE_BROWSER_BRIDGE_PASSWORD")
@@ -93,7 +121,7 @@ func run() error {
 		}
 	}
 	go (&imports.Service{Store: store}).Run(ctx)
-	go maintenance(ctx, store)
+	go maintenance(ctx, store, private)
 	// A native Chrome window is available only on a loopback development server.
 	server.LocalBrowser = cfg.Mode == "local" && env("HOST", "127.0.0.1") == "127.0.0.1"
 	server.BrowserMode = cfg.Mode
@@ -151,7 +179,7 @@ func env(k, def string) string {
 	}
 	return def
 }
-func maintenance(ctx context.Context, s *platform.Store) {
+func maintenance(ctx context.Context, s *platform.Store, private string) {
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
 	// Also catch links that expired while the backend was stopped.
@@ -163,22 +191,47 @@ func maintenance(ctx context.Context, s *platform.Store) {
 		}
 	}
 	cancelExpired()
+	lastFull := time.Time{}
+	reconcile := func() {
+		check, done := context.WithTimeout(ctx, 30*time.Second)
+		defer done()
+		var n int
+		var err error
+		if time.Since(lastFull) >= time.Hour {
+			n, err = wallet.FullReconcile(check, s)
+			if err == nil {
+				lastFull = time.Now()
+			}
+		} else {
+			n, err = wallet.Reconcile(check, s, 100)
+		}
+		if err != nil {
+			slog.Error("ledger_reconciliation_failed", "error", err)
+		} else if n > 0 {
+			slog.Error("ledger_mismatch", "accounts", n)
+		}
+	}
+	reconcile()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 			cancelExpired()
+			cleanup, done := context.WithTimeout(ctx, 30*time.Second)
+			if e := privatefiles.Cleanup(cleanup, s, private); e != nil {
+				slog.Error("private_file_cleanup_failed", "error", e)
+			}
+			done()
+			if _, e := s.Pool.Exec(ctx, `UPDATE link_operations SET status='indeterminate',updated_at=now() WHERE status='running' AND created_at<now()-interval '2 minutes'`); e != nil {
+				slog.Error("link_operation_recovery_failed", "error", e)
+			}
 			for _, q := range []string{`DELETE FROM rate_limit_buckets WHERE expires_at<now()`, `DELETE FROM oauth_requests WHERE expires_at<now()`, `DELETE FROM sessions WHERE expires_at<now()`} {
 				if _, e := s.Pool.Exec(ctx, q); e != nil {
 					slog.Error("maintenance_failed", "error", e)
 				}
 			}
-			var n int
-			e := s.Pool.QueryRow(ctx, `SELECT count(*) FROM (SELECT a.id FROM wallet_accounts a LEFT JOIN wallet_entries e ON e.account_id=a.id GROUP BY a.id HAVING a.balance<>coalesce(sum(e.amount),0)) x`).Scan(&n)
-			if e == nil && n > 0 {
-				slog.Error("ledger_mismatch", "accounts", n)
-			}
+			reconcile()
 		}
 	}
 }

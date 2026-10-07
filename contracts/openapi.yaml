@@ -2938,6 +2938,17 @@
               "maxLength": 500
             },
             "description": "Token from GET /me; Origin must match the configured frontend."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            },
+            "description": "One key per logical operation. In-flight retries return LINK_CREATION_IN_PROGRESS; succeeded retries replay the fixed link and coefficient."
           }
         ],
         "responses": {
@@ -8865,6 +8876,16 @@
               }
             }
           },
+          "410": {
+            "description": "Use the unified Shopee settings form",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation failure",
             "content": {
@@ -8887,16 +8908,6 @@
           },
           "503": {
             "description": "Dependency not configured or unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "410": {
-            "description": "Use the unified Shopee settings form",
             "content": {
               "application/json": {
                 "schema": {
@@ -11178,8 +11189,8 @@
               }
             }
           },
-          "422": {
-            "description": "Invalid Affiliate ID",
+          "410": {
+            "description": "Use the unified Shopee settings form",
             "content": {
               "application/json": {
                 "schema": {
@@ -11188,8 +11199,8 @@
               }
             }
           },
-          "410": {
-            "description": "Use the unified Shopee settings form",
+          "422": {
+            "description": "Invalid Affiliate ID",
             "content": {
               "application/json": {
                 "schema": {
@@ -11283,9 +11294,6 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "Link deleted; no response body"
-          },
           "400": {
             "description": "Invalid JSON",
             "content": {
@@ -11307,7 +11315,7 @@
             }
           },
           "403": {
-            "description": "Permission, CSRF or reauthentication failure",
+            "description": "Link deletion disabled, permission or CSRF failure",
             "content": {
               "application/json": {
                 "schema": {
@@ -11318,16 +11326,6 @@
           },
           "404": {
             "description": "Link not found or owned by another customer",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "State or idempotency conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -11368,7 +11366,8 @@
           }
         },
         "summary": "DELETE /affiliate-links/{id}",
-        "description": "Physically removes a signed saved link belonging to the customer. Legacy links are read-only; pending or approved orders lock deletion. Timely orders remain attributable after deletion."
+        "description": "Customer link deletion is disabled. Owned links return 403 LINK_DELETION_DISABLED; missing or foreign links return 404. Expired links remain saved with cancellation status.",
+        "deprecated": true
       },
       "get": {
         "operationId": "get__affiliate_links__id_",
@@ -12100,6 +12099,169 @@
           "Internal"
         ]
       }
+    },
+    "/me/purchases": {
+      "get": {
+        "operationId": "getCustomerPurchases",
+        "tags": [
+          "Customer"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "perPage",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 512
+            },
+            "description": "Opaque nextCursor from the previous response; takes precedence over page."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vi",
+                "en"
+              ]
+            },
+            "description": "Error message language. Defaults to Vietnamese; error codes stay unchanged."
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "selecting",
+                "progress",
+                "completed",
+                "rejected",
+                "all"
+              ],
+              "default": "all"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Purchase"
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission, CSRF or reauthentication failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid status or cursor"
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Customer purchases and links awaiting reports"
+      }
     }
   },
   "components": {
@@ -12393,6 +12555,13 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 80
+          },
+          "expectedCostXu": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 1000000000000,
+            "description": "Price shown to the customer. A changed catalog price returns 409 GIFT_PRICE_CHANGED without reserving Xu or stock. Optional for older clients."
           }
         },
         "required": [
@@ -12653,7 +12822,8 @@
             "enum": [
               "approved",
               "rejected",
-              "adjustment"
+              "adjustment",
+              "reopened"
             ]
           },
           "reason": {
@@ -13007,6 +13177,9 @@
             "minimum": 0,
             "maximum": 100,
             "multipleOf": 0.01
+          },
+          "internallyRejected": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -13180,7 +13353,11 @@
             ]
           },
           "canDelete": {
-            "type": "boolean"
+            "type": "boolean",
+            "enum": [
+              false
+            ],
+            "description": "Always false: customers cannot delete saved links."
           },
           "legacy": {
             "type": "boolean"
@@ -13200,6 +13377,11 @@
             "type": "string",
             "pattern": "^(0\\.[0-9]{2}|1\\.00)$",
             "nullable": true
+          },
+          "productName": {
+            "type": "string",
+            "nullable": true,
+            "description": "Product name captured by the verified server checker; legacy links may be unnamed."
           }
         },
         "required": [
@@ -14237,10 +14419,19 @@
             ]
           },
           "canDelete": {
-            "type": "boolean"
+            "type": "boolean",
+            "enum": [
+              false
+            ],
+            "description": "Always false: customers cannot delete saved links."
           },
           "legacy": {
             "type": "boolean"
+          },
+          "productName": {
+            "type": "string",
+            "nullable": false,
+            "description": "Product name captured by the verified server checker; legacy links may be unnamed."
           }
         },
         "required": [
@@ -14814,6 +15005,61 @@
             "type": "string",
             "format": "uri",
             "maxLength": 2048
+          }
+        }
+      },
+      "Purchase": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "sortAt",
+          "link",
+          "order"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "link",
+              "order"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "selecting",
+              "progress",
+              "completed",
+              "rejected",
+              "legacy"
+            ]
+          },
+          "sortAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "link": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AffiliateLink"
+              }
+            ],
+            "nullable": true
+          },
+          "order": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Order"
+              }
+            ],
+            "nullable": true
           }
         }
       }

@@ -22,11 +22,10 @@ func (s *Service) Post(ctx context.Context, user, channel, body string) (any, er
 }
 func (s *Service) Like(ctx context.Context, user, id string, like bool) error {
 	if like {
-		tag, e := s.Store.Pool.Exec(ctx, `INSERT INTO deal_likes SELECT id,$2 FROM deals WHERE id=$1 AND NOT hidden AND NOT deleted ON CONFLICT DO NOTHING`, id, user)
+		_, e := s.Store.Pool.Exec(ctx, `INSERT INTO deal_likes SELECT id,$2 FROM deals WHERE id=$1 AND NOT hidden AND NOT deleted ON CONFLICT DO NOTHING`, id, user)
 		if e != nil {
 			return e
 		}
-		_ = tag
 		return nil
 	}
 	_, e := s.Store.Pool.Exec(ctx, `DELETE FROM deal_likes WHERE deal_id=$1 AND user_id=$2`, id, user)
@@ -41,8 +40,6 @@ func (s *Service) Moderate(ctx context.Context, actor, id, action, reason string
 		return e
 	}
 	defer tx.Rollback(ctx)
-	var tag interface{}
-	_ = tag
 	switch action {
 	case "hide", "show":
 		_, e = tx.Exec(ctx, `UPDATE deals SET hidden=$2,reason=$3 WHERE id=$1 AND NOT deleted`, id, action == "hide", reason)

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"hoanxu/internal/platform"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -22,7 +23,7 @@ func TestForeignAffiliateInputUsesOwnAttributionAndCanonicalURL(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := &offerLinkFixture{}
-	aff := &affiliate.Service{Store: s, Enabled: true, TrackingVerified: true, LinkGenerator: f}
+	aff := &affiliate.Service{Store: s, Enabled: true, TrackingVerified: true, LinkGenerator: f, ProductLookup: verifiedLinkProduct}
 	raw := "https://s.shopee.vn/an_redir?affiliate_id=foreign-publisher&sub_id=foreign-customer&origin_link=" + url.QueryEscape("https://shopee.vn/opaanlp/264049024/27783958254?credential_token=discard&utm_source=foreign")
 	value, err := aff.CreateLink(ctx, customer, raw)
 	if err != nil {
@@ -79,6 +80,7 @@ func TestShopInputRejectedByBothHTTPRoutesWithoutCreatingLink(t *testing.T) {
 			r := httptest.NewRequest(http.MethodPost, "/api/v1"+endpoint, strings.NewReader(`{"url":"https://shopee.vn/jinbox.vn?utm_source=foreign"}`))
 			r.AddCookie(&http.Cookie{Name: "hx_session", Value: token})
 			r.Header.Set("Origin", "http://localhost:3000")
+			r.Header.Set("Idempotency-Key", platform.Token())
 			r.Header.Set("X-CSRF-Token", u.CSRF)
 			r.Header.Set("Accept-Language", lang)
 			w := httptest.NewRecorder()

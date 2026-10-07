@@ -183,11 +183,22 @@ func (m *Manager) start(ctx context.Context) error {
 		// targets this controller created; never touch the native login tab.
 		cleanup, stopCleanup := context.WithTimeout(root, 5*time.Second)
 		browserCtx := cdp.WithExecutor(cleanup, chromedp.FromContext(root).Browser)
+		remaining := map[target.ID]bool{chromedp.FromContext(root).Target.TargetID: true}
+		infos, inspectErr := target.GetTargets().Do(browserCtx)
+		live := make(map[target.ID]bool, len(infos))
+		for _, info := range infos {
+			live[info.TargetID] = true
+		}
 		for id := range m.ownedTargets {
-			_ = target.CloseTarget(id).Do(browserCtx)
+			if inspectErr == nil && !live[id] {
+				continue
+			}
+			if err := target.CloseTarget(id).Do(browserCtx); err != nil {
+				remaining[id] = true
+			}
 		}
 		stopCleanup()
-		m.ownedTargets = map[target.ID]bool{chromedp.FromContext(root).Target.TargetID: true}
+		m.ownedTargets = remaining
 	}
 	m.root = root
 	m.cancel = rc
@@ -626,9 +637,24 @@ func (m *Manager) forgetTarget(ctx context.Context) {
 	select {
 	case <-c.Browser.LostConnection:
 		// Keep the ID so the next connection can close this orphaned tab.
+		return
 	default:
-		delete(m.ownedTargets, c.Target.TargetID)
 	}
+	// Cancellation can race the transport's LostConnection notification.
+	// Forget only targets confirmed absent, so a broken connection cannot erase
+	// the orphan IDs that reconnect cleanup needs.
+	check, done := context.WithTimeout(context.Background(), 2*time.Second)
+	defer done()
+	infos, err := target.GetTargets().Do(cdp.WithExecutor(check, c.Browser))
+	if err != nil {
+		return
+	}
+	for _, info := range infos {
+		if info.TargetID == c.Target.TargetID {
+			return
+		}
+	}
+	delete(m.ownedTargets, c.Target.TargetID)
 }
 
 // A Shopee verification redirect is not evidence that the affiliate login expired.

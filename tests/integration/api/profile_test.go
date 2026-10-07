@@ -65,7 +65,11 @@ func TestBankProfileEncryptionOwnershipAndWithdrawalSnapshot(t *testing.T) {
 		t.Fatal(e)
 	}
 	session, e := a.Session(ctx, token)
-	if e != nil || session.BankDetails == nil || session.BankDetails.Account != bank.Account {
+	if e != nil || session.BankDetails != nil {
+		t.Fatal("principal contains bank details", session, e)
+	}
+	full, e := a.Profile(ctx, session)
+	if e != nil || full.BankDetails == nil || full.BankDetails.Account != bank.Account {
 		t.Fatal(session, e)
 	}
 	srv := New(&Server{Store: store, Auth: a, Affiliate: &affiliate.Service{Store: store}, Origin: "http://localhost:3000", PrivateDir: t.TempDir()})
@@ -96,7 +100,7 @@ func TestBankProfileEncryptionOwnershipAndWithdrawalSnapshot(t *testing.T) {
 	if e = profile.Update(ctx, uid, "customer", users.ProfileInput{BankDetails: &users.BankDetails{}}); e != nil {
 		t.Fatal(e)
 	}
-	session, e = a.Session(ctx, token)
+	session, e = a.Profile(ctx, session)
 	if e != nil || session.BankDetails != nil {
 		t.Fatal("profile was not cleared", session, e)
 	}

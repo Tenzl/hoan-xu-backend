@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jackc/pgx/v5"
 	"golang.org/x/sync/singleflight"
 	"hoanxu/internal/browser"
 	"hoanxu/internal/cashback"
@@ -11,6 +12,7 @@ import (
 	"hoanxu/internal/tracking"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -27,7 +29,9 @@ type OfferLinkGenerator interface {
 type Service struct {
 	Store         *platform.Store
 	Browser       *browser.Manager
-	LinkGenerator OfferLinkGenerator // Defaults to Browser.
+	LinkGenerator OfferLinkGenerator                         // Defaults to Browser.
+	ProductLookup func(context.Context, string) (any, error) // Defaults to the verified product checker.
+	Lifetime      context.Context
 
 	Enabled, TrackingVerified bool
 	ManagedConfig             bool
@@ -151,7 +155,14 @@ func (s *Service) Check(ctx context.Context, raw string) (value any, checkErr er
 	}
 }
 func (s *Service) CreateLink(ctx context.Context, user, raw string) (any, error) {
-	shop, item, canonical, e := Resolve(ctx, raw)
+	return s.createLink(ctx, user, raw, nil)
+}
+func (s *Service) createLink(ctx context.Context, user, raw string, complete func(pgx.Tx, string, any) error) (any, error) {
+	ctx, finish := context.WithTimeout(ctx, 55*time.Second)
+	defer finish()
+	resolveCtx, resolveDone := context.WithTimeout(ctx, 8*time.Second)
+	shop, item, canonical, e := Resolve(resolveCtx, raw)
+	resolveDone()
 	if e != nil {
 		return nil, resolveError(e)
 	}
@@ -200,6 +211,28 @@ func (s *Service) CreateLink(ctx context.Context, user, raw string) (any, error)
 	if e = tx.Commit(ctx); e != nil {
 		return nil, e
 	}
+	lookup := s.ProductLookup
+	if lookup == nil {
+		lookup = s.Check
+	}
+	checked, e := lookup(ctx, canonical)
+	if e != nil {
+		return nil, e
+	}
+	productRaw, e := json.Marshal(checked)
+	if e != nil {
+		return nil, e
+	}
+	var product struct {
+		Name     string `json:"productName"`
+		Shop     string `json:"shopId"`
+		Item     string `json:"itemId"`
+		Verified bool   `json:"schemaVerified"`
+	}
+	if json.Unmarshal(productRaw, &product) != nil || !product.Verified || strings.TrimSpace(product.Name) == "" || product.Shop != shop || product.Item != item {
+		return nil, platform.Fail(502, "SHOPEE_RESPONSE_INVALID", "Dữ liệu sản phẩm Shopee không hợp lệ. Vui lòng thử lại sau.")
+	}
+	product.Name = strings.TrimSpace(product.Name)
 	rate, e := cashback.SampleLink(nil, int(m.Min), int(m.Max), int(m.Tax))
 	if e != nil {
 		return nil, platform.Fail(422, "INVALID_CASHBACK_POLICY", "Khoảng tỷ lệ cần là số nguyên và chênh lệch ít nhất 5 điểm phần trăm.")
@@ -237,9 +270,21 @@ func (s *Service) CreateLink(ctx context.Context, user, raw string) (any, error)
 		return nil, e
 	}
 	var id string
-	e = s.Store.Pool.QueryRow(ctx, `INSERT INTO affiliate_links(user_id,channel,original_url,affiliate_url,tracking_code,policy_id,item_id,created_at,tier_code,min_share_bps,max_share_bps,tracking_sub_ids,expires_at,payout_factor,effective_share_bps,lifecycle_status) VALUES($1,'shopee',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'active') RETURNING id::text`, user, canonical, shortURL, ids[2], m.PolicyID, item, created, m.Code, int(m.Public().Min), int(m.Public().Max), subIDs, claims.ExpiresAt(), rate.Factor(), rate.EffectiveBps).Scan(&id)
+	save, e := s.Store.Pool.Begin(ctx)
 	if e != nil {
 		return nil, e
 	}
-	return map[string]any{"id": id, "status": "active", "canDelete": true, "legacy": false, "affiliateUrl": shortURL, "trackingCode": ids[2], "channel": "shopee", "policyId": m.PolicyID, "tierCode": m.Code, "minSharePercent": m.Public().Min, "maxSharePercent": m.Public().Max, "effectiveSharePercent": cashback.Percent(rate.EffectiveBps), "payoutFactor": rate.Factor(), "createdAt": created, "expiresAt": claims.ExpiresAt()}, nil
+	defer save.Rollback(ctx)
+	e = save.QueryRow(ctx, `INSERT INTO affiliate_links(user_id,channel,original_url,affiliate_url,tracking_code,policy_id,item_id,created_at,tier_code,min_share_bps,max_share_bps,tracking_sub_ids,expires_at,payout_factor,effective_share_bps,lifecycle_status,product_name) VALUES($1,'shopee',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'active',$15) RETURNING id::text`, user, canonical, shortURL, ids[2], m.PolicyID, item, created, m.Code, int(m.Public().Min), int(m.Public().Max), subIDs, claims.ExpiresAt(), rate.Factor(), rate.EffectiveBps, product.Name).Scan(&id)
+	if e != nil {
+		return nil, e
+	}
+	result := map[string]any{"id": id, "status": "active", "canDelete": false, "legacy": false, "affiliateUrl": shortURL, "trackingCode": ids[2], "channel": "shopee", "policyId": m.PolicyID, "tierCode": m.Code, "minSharePercent": m.Public().Min, "maxSharePercent": m.Public().Max, "effectiveSharePercent": cashback.Percent(rate.EffectiveBps), "payoutFactor": rate.Factor(), "createdAt": created, "expiresAt": claims.ExpiresAt()}
+	result["productName"] = product.Name
+	if complete != nil {
+		if e = complete(save, id, result); e != nil {
+			return nil, e
+		}
+	}
+	return result, save.Commit(ctx)
 }

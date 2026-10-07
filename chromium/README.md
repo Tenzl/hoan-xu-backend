@@ -1,5 +1,7 @@
 # Chromium trên EC2
 
+Nguồn canonical là `backend/chromium/`. Bản `chromium/` ở gốc workspace được xuất bằng `backend/scripts/export-chromium.ps1`; sửa nguồn rồi xuất lại. Script chỉ copy các file công khai, giữ secrets và profile tại đích.
+
 Folder `chromium/` ở gốc repo backend này triển khai độc lập: chỉ Chromium, màn hình ảo và noVNC. Go API và
 chromedp tiếp tục chạy trên Render; PostgreSQL giữ ở dịch vụ hiện tại.
 

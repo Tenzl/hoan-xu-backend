@@ -9,50 +9,23 @@ import (
 )
 
 // Order state is authoritative. A late report can revive a cancelled link.
-const LinksSQL = `SELECT jsonb_build_object('id',l.id,'channel',l.channel,'originalUrl',l.original_url,'affiliateUrl',l.affiliate_url,'trackingCode',l.tracking_code,'createdAt',l.created_at,'expiresAt',l.expires_at,'policyId',l.policy_id,'tierCode',l.tier_code,'minSharePercent',l.min_share_bps::numeric/100,'maxSharePercent',l.max_share_bps::numeric/100,'effectiveSharePercent',l.effective_share_bps::numeric/100,'payoutFactor',l.payout_factor::text,'legacy',l.tracking_sub_ids IS NULL,'status',CASE WHEN l.tracking_sub_ids IS NULL THEN 'legacy' WHEN o.pending>0 THEN 'progress' WHEN o.approved>0 THEN 'completed' WHEN o.total>0 OR l.expires_at<=now() OR l.lifecycle_status='cancelled' THEN 'cancelled' ELSE 'active' END,'canDelete',l.tracking_sub_ids IS NOT NULL AND o.pending=0 AND o.approved=0) FROM affiliate_links l CROSS JOIN LATERAL (SELECT count(*) AS total,count(*) FILTER(WHERE status='pending') AS pending,count(*) FILTER(WHERE status='approved') AS approved FROM orders WHERE user_id=l.user_id AND tracking_code=l.tracking_code) o`
+const LinkJSON = `jsonb_build_object('productName',coalesce(nullif(l.product_name,''),(SELECT product_name FROM orders n WHERE n.user_id=l.user_id AND (n.link_id=l.id OR n.tracking_code=l.tracking_code) ORDER BY n.ordered_at DESC,n.id DESC LIMIT 1)),'id',l.id,'channel',l.channel,'originalUrl',l.original_url,'affiliateUrl',l.affiliate_url,'trackingCode',l.tracking_code,'createdAt',l.created_at,'expiresAt',l.expires_at,'policyId',l.policy_id,'tierCode',l.tier_code,'minSharePercent',l.min_share_bps::numeric/100,'maxSharePercent',l.max_share_bps::numeric/100,'effectiveSharePercent',l.effective_share_bps::numeric/100,'payoutFactor',l.payout_factor::text,'legacy',l.tracking_sub_ids IS NULL,'status',CASE WHEN l.tracking_sub_ids IS NULL THEN 'legacy' WHEN o.pending>0 THEN 'progress' WHEN o.approved>0 THEN 'completed' WHEN o.total>0 OR l.expires_at<=now() OR l.lifecycle_status='cancelled' THEN 'cancelled' ELSE 'active' END,'canDelete',false)`
+const LinkFromSQL = `FROM affiliate_links l CROSS JOIN LATERAL (SELECT count(*) AS total,count(*) FILTER(WHERE status='pending') AS pending,count(*) FILTER(WHERE status='approved') AS approved FROM orders WHERE user_id=l.user_id AND tracking_code=l.tracking_code) o`
+
+const LinksSQL = "SELECT " + LinkJSON + " " + LinkFromSQL
 
 func (s *Service) DeleteLink(ctx context.Context, user, id string) error {
 	if !platform.ID(id) {
 		return platform.Fail(404, "NOT_FOUND", "Không có link.")
 	}
-	tx, err := s.Store.Pool.Begin(ctx)
-	if err != nil {
+	var owned bool
+	if err := s.Store.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM affiliate_links WHERE id=$1 AND user_id=$2)`, id, user).Scan(&owned); err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
-	var code string
-	err = tx.QueryRow(ctx, `SELECT tracking_code FROM affiliate_links WHERE id=$1 AND user_id=$2`, id, user).Scan(&code)
-	if err == pgx.ErrNoRows {
+	if !owned {
 		return platform.Fail(404, "NOT_FOUND", "Không có link.")
 	}
-	if err != nil {
-		return err
-	}
-	if err = platform.LockTracking(ctx, tx, user, code); err != nil {
-		return err
-	}
-	var legacy bool
-	err = tx.QueryRow(ctx, `SELECT tracking_sub_ids IS NULL FROM affiliate_links WHERE id=$1 AND user_id=$2 FOR UPDATE`, id, user).Scan(&legacy)
-	if err == pgx.ErrNoRows {
-		return platform.Fail(404, "NOT_FOUND", "Không có link.")
-	}
-	if err != nil {
-		return err
-	}
-	if legacy {
-		return platform.Fail(409, "LEGACY_LINK_READ_ONLY", "Link lịch sử chỉ được xem, không được xóa.")
-	}
-	var locked bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM orders WHERE user_id=$1 AND tracking_code=$2 AND status IN ('pending','approved'))`, user, code).Scan(&locked); err != nil {
-		return err
-	}
-	if locked {
-		return platform.Fail(409, "LINK_HAS_ORDERS", "Link đang xử lý hoặc hoàn thành, không được xóa.")
-	}
-	if _, err = tx.Exec(ctx, `DELETE FROM affiliate_links WHERE id=$1 AND user_id=$2`, id, user); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	return platform.Fail(403, "LINK_DELETION_DISABLED", "Không thể xóa link. Link hết hạn sẽ được chuyển sang cancel.")
 }
 
 // Bounded batches and a per-token lock allow multiple workers safely.

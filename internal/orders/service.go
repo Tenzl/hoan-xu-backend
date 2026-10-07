@@ -35,9 +35,13 @@ func (s *Service) Event(ctx context.Context, actor, id, key string, p Event) (an
 		var issued, expires *time.Time
 		var at time.Time
 		var subIDs []byte
+		var internalRejection bool
 		e := tx.QueryRow(ctx, `SELECT user_id::text,status,cashback,commission,source_status,share_bps,cashback_mode,publisher,ordered_at,link_created_at,link_expires_at,tracking_sub_ids,policy_id::text FROM orders WHERE id=$1 FOR UPDATE`, id).Scan(&user, &status, &cash, &commission, &sourceStatus, &bps, &mode, &publisher, &at, &issued, &expires, &subIDs, &policyID)
 		if e != nil {
 			return nil, platform.Fail(404, "NOT_FOUND", "Không có đơn.")
+		}
+		if e = tx.QueryRow(ctx, `SELECT internally_rejected FROM orders WHERE id=$1`, id).Scan(&internalRejection); e != nil {
+			return nil, e
 		}
 		next := status
 		switch p.Action {
@@ -80,6 +84,18 @@ func (s *Service) Event(ctx context.Context, actor, id, key string, p Event) (an
 			} else if !platform.Text(p.Reason, 3, 500) {
 				return nil, platform.Fail(422, "REASON_REQUIRED", "Cần lý do từ chối.")
 			}
+			if next == "rejected" {
+				internalRejection = true
+			}
+		case "reopened":
+			if status != "rejected" || !internalRejection || sourceStatus == "rejected" {
+				return nil, platform.Fail(409, "INVALID_TRANSITION", "Chỉ mở lại đơn bị quản trị từ chối khi nguồn sàn còn hợp lệ.")
+			}
+			if !platform.Text(p.Reason, 3, 500) {
+				return nil, platform.Fail(422, "REASON_REQUIRED", "Cần lý do mở lại đơn.")
+			}
+			cash, e = cashback.OrderAmount(commission, bps, mode)
+			next, internalRejection = "pending", false
 		case "adjustment":
 			if status != "approved" || p.Commission < 0 || p.Commission > 1e12 || !platform.Text(p.Reason, 3, 500) {
 				return nil, platform.Fail(422, "INVALID_ADJUSTMENT", "Điều chỉnh cần đơn đã duyệt, số hoa hồng hợp lệ và lý do.")
@@ -117,7 +133,7 @@ func (s *Service) Event(ctx context.Context, actor, id, key string, p Event) (an
 		if e != nil {
 			return nil, e
 		}
-		_, e = tx.Exec(ctx, `UPDATE orders SET status=$2,cashback=$3,commission=$4,approved_at=CASE WHEN $2='approved' THEN coalesce(approved_at,now()) ELSE approved_at END WHERE id=$1`, id, next, cash, commission)
+		_, e = tx.Exec(ctx, `UPDATE orders SET status=$2,cashback=$3,commission=$4,internally_rejected=$5,approved_at=CASE WHEN $2='approved' THEN coalesce(approved_at,now()) ELSE approved_at END WHERE id=$1`, id, next, cash, commission, internalRejection)
 		if e != nil {
 			return nil, e
 		}

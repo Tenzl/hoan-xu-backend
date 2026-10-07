@@ -82,7 +82,7 @@ func TestAffiliateShortLinkAcceptsDatabasePublisherWithoutEnvironmentVariable(t 
 	store, customer, admin := testStore(t)
 	configureLinkPolicy(t, store)
 	ctx := context.Background()
-	aff := &affiliate.Service{Store: store, Enabled: true, TrackingVerified: true, LinkGenerator: &offerLinkFixture{}}
+	aff := &affiliate.Service{Store: store, Enabled: true, TrackingVerified: true, LinkGenerator: &offerLinkFixture{}, ProductLookup: verifiedLinkProduct}
 	if _, err := store.Pool.Exec(ctx, `UPDATE affiliate_channels SET status='available',settings='{"template":"https://s.shopee.vn/an_redir"}' WHERE id='shopee'`); err != nil {
 		t.Fatal(err)
 	}

@@ -32,6 +32,14 @@ func run() error {
 		return fmt.Errorf("run this command from the backend repository root")
 	}
 	replace := make(map[string]string)
+	if os.Getenv("REQUIRE_DB_TESTS") == "1" && os.Getenv("TEST_DATABASE_URL") == "" {
+		return fmt.Errorf("database integration is mandatory: set TEST_DATABASE_URL")
+	}
+	if os.Getenv("REQUIRE_BROWSER_FIXTURES") == "1" {
+		if _, err := os.Stat(os.Getenv("BROWSER_TEST_PATH")); err != nil {
+			return fmt.Errorf("Chromium fixtures are mandatory: set BROWSER_TEST_PATH to an executable")
+		}
+	}
 	for _, group := range []string{"unit", "integration"} {
 		base := filepath.Join(root, "tests", group)
 		err := filepath.WalkDir(base, func(path string, entry fs.DirEntry, err error) error {

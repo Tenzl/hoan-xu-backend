@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"github.com/go-chi/chi/v5"
@@ -20,7 +22,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -432,35 +433,52 @@ func (s *Server) saveFile(r *http.Request, purpose string) (string, string, erro
 		return "", "", platform.Fail(422, "FILE_REQUIRED", "Cần chọn file.")
 	}
 	defer f.Close()
-	b, e := io.ReadAll(io.LimitReader(f, 10*1024*1024+1))
+	if e = os.MkdirAll(s.PrivateDir, 0700); e != nil {
+		return "", "", e
+	}
+	name := platform.Token()
+	path := filepath.Join(s.PrivateDir, name)
+	out, e := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
 	if e != nil {
 		return "", "", e
 	}
-	if len(b) > 10*1024*1024 || len(b) == 0 {
+	keep := false
+	defer func() {
+		_ = out.Close()
+		if !keep {
+			_ = os.Remove(path)
+		}
+	}()
+	n, e := io.Copy(out, io.LimitReader(f, 10*1024*1024+1))
+	if e != nil {
+		return "", "", e
+	}
+	if n == 0 || n > 10*1024*1024 {
 		return "", "", platform.Fail(422, "INVALID_UPLOAD", "File rỗng hoặc vượt 10 MB.")
 	}
-	ct := http.DetectContentType(b)
+	if _, e = out.Seek(0, 0); e != nil {
+		return "", "", e
+	}
+	prefix := make([]byte, 512)
+	nread, e := out.Read(prefix)
+	if e != nil && e != io.EOF {
+		return "", "", e
+	}
+	ct := http.DetectContentType(prefix[:nread])
 	if purpose == "evidence" && ct != "image/png" && ct != "image/jpeg" && ct != "application/pdf" {
 		return "", "", platform.Fail(422, "INVALID_UPLOAD", "Bằng chứng chỉ nhận PNG, JPEG, PDF.")
 	}
 	if purpose == "csv" {
 		ct = "text/csv"
 	}
-	if e = os.MkdirAll(s.PrivateDir, 0700); e != nil {
-		return "", "", e
-	}
-	name := platform.Token()
-	path := filepath.Join(s.PrivateDir, name)
-	if e = os.WriteFile(path, b, 0600); e != nil {
-		return "", "", e
-	}
 	var id string
-	e = s.Store.Pool.QueryRow(r.Context(), `INSERT INTO private_files(owner_id,purpose,name,path,content_type) VALUES($1,$2,$3,$4,$5) RETURNING id::text`, user(r).ID, purpose, filepath.Base(h.Filename), name, ct).Scan(&id)
+	e = s.Store.Pool.QueryRow(r.Context(), `INSERT INTO private_files(owner_id,purpose,name,path,content_type,lifecycle) VALUES($1,$2,$3,$4,$5,$6) RETURNING id::text`, user(r).ID, purpose, filepath.Base(h.Filename), name, ct, map[bool]string{true: "staged", false: "attached"}[purpose == "csv"]).Scan(&id)
 	if e != nil {
 		_ = os.Remove(path)
 		return "", "", e
 	}
-	return id, string(b), nil
+	keep = true
+	return id, path, nil
 }
 func (s *Server) uploadEvidence(w http.ResponseWriter, r *http.Request) {
 	id, _, e := s.saveFile(r, "evidence")
@@ -488,11 +506,21 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filepath.Join(s.PrivateDir, path))
 }
 func (s *Server) previewCSV(w http.ResponseWriter, r *http.Request) {
-	id, raw, e := s.saveFile(r, "csv")
+	id, path, e := s.saveFile(r, "csv")
 	if e != nil {
 		s.reply(w, r, 0, nil, e)
 		return
 	}
+	attached := false
+	defer func() {
+		if !attached {
+			ctx, done := context.WithTimeout(context.Background(), 5*time.Second)
+			defer done()
+			if tag, err := s.Store.Pool.Exec(ctx, `DELETE FROM private_files WHERE id=$1 AND lifecycle='staged'`, id); err == nil && tag.RowsAffected() == 1 {
+				_ = os.Remove(path)
+			}
+		}
+	}()
 	mapping := map[string]string{}
 	if m := r.FormValue("mapping"); m != "" {
 		if e = json.Unmarshal([]byte(m), &mapping); e != nil {
@@ -500,7 +528,14 @@ func (s *Server) previewCSV(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	rows, e := imports.Parse(strings.NewReader(raw), mapping)
+	f, e := os.Open(path)
+	if e != nil {
+		s.reply(w, r, 0, nil, e)
+		return
+	}
+	defer f.Close()
+	hash := sha256.New()
+	rows, e := imports.Parse(io.TeeReader(f, hash), mapping)
 	if e != nil {
 		s.reply(w, r, 0, nil, platform.Fail(422, "CSV_INVALID", e.Error()))
 		return
@@ -510,7 +545,8 @@ func (s *Server) previewCSV(w http.ResponseWriter, r *http.Request) {
 		s.reply(w, r, 0, nil, e)
 		return
 	}
-	v, e := (&imports.Service{Store: s.Store}).Preview(r.Context(), user(r).ID, filename, platform.Hash(raw), mapping, rows)
+	v, e := (&imports.Service{Store: s.Store}).PreviewFile(r.Context(), user(r).ID, filename, hex.EncodeToString(hash.Sum(nil)), id, mapping, rows)
+	attached = e == nil
 	s.reply(w, r, 201, v, e)
 }
 func (s *Server) manualOrder(w http.ResponseWriter, r *http.Request) {
@@ -561,7 +597,7 @@ func (s *Server) manualOrder(w http.ResponseWriter, r *http.Request) {
 		if e := cashback.LockOrder(r.Context(), tx, row.Channel, row.Publisher, row.OrderID, row.LineID); e != nil {
 			return nil, e
 		}
-		id, cash, e := imports.InsertSignedOrder(r.Context(), tx, s.Store, &row)
+		id, cash, e := imports.InsertAttributedOrder(r.Context(), tx, &row, a)
 		if e != nil {
 			return nil, platform.Conflict(e)
 		}

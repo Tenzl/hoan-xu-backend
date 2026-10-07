@@ -3,12 +3,9 @@ package cashback
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"math/big"
 	"regexp"
 	"strconv"
 	"strings"
@@ -188,22 +185,6 @@ func (s *Service) Create(ctx context.Context, actor, key string, p Input) (any, 
 		}
 		return Current(ctx, s.Store.Queries.WithTx(tx))
 	})
-}
-func Sample(source io.Reader, min, max int) (int, error) {
-	if min < 0 || max > 10000 || min > max {
-		return 0, fmt.Errorf("invalid cashback range")
-	}
-	if min == max {
-		return min, nil
-	}
-	if source == nil {
-		source = rand.Reader
-	}
-	n, e := rand.Int(source, big.NewInt(int64(max-min+1)))
-	if e != nil {
-		return 0, e
-	}
-	return min + int(n.Int64()), nil
 }
 func Amount(commission int64, bps int) (int64, error) {
 	if commission < 0 || commission > 1e12 || bps < 0 || bps > 10000 {

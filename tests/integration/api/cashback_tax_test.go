@@ -33,7 +33,7 @@ func TestTaxSnapshotUsesArchivedPolicyAndActualCommission(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture := &offerLinkFixture{}
-	service := &affiliate.Service{Store: s, Enabled: true, TrackingVerified: true, LinkGenerator: fixture}
+	service := &affiliate.Service{Store: s, Enabled: true, TrackingVerified: true, LinkGenerator: fixture, ProductLookup: verifiedLinkProduct}
 	raw, err := service.CreateLink(ctx, customer, "https://shopee.vn/product/1/2")
 	if err != nil {
 		t.Fatal(err)

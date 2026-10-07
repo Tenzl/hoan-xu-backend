@@ -29,21 +29,40 @@ func Attribute(ctx context.Context, tx pgx.Tx, s *platform.Store, row *Row) (Att
 		return a, ineligible("Không thuộc chiến dịch Hoàn Xu hoặc dùng mã link cũ")
 	}
 	var publisher string
-	e := tx.QueryRow(ctx, `SELECT coalesce(settings->>'publisher','') FROM affiliate_channels WHERE id='shopee'`).Scan(&publisher)
+	rows, e := tx.Query(ctx, `SELECT publisher FROM tracking_publishers UNION SELECT settings->>'publisher' FROM affiliate_channels WHERE id='shopee' AND coalesce(settings->>'publisher','')<>''`)
 	if e != nil {
 		return a, e
 	}
-	if publisher == "" {
-		return a, ineligible("Chưa cấu hình Affiliate ID")
+	var candidates []string
+	for rows.Next() {
+		var candidate string
+		if e = rows.Scan(&candidate); e != nil {
+			rows.Close()
+			return a, e
+		}
+		candidates = append(candidates, candidate)
 	}
-	if row.Publisher != "" && row.Publisher != publisher {
-		return a, ineligible("Affiliate ID không khớp")
+	e = rows.Err()
+	rows.Close()
+	if e != nil {
+		return a, e
+	}
+	var c tracking.Claims
+	matches := 0
+	for _, candidate := range candidates {
+		if row.Publisher != "" && row.Publisher != candidate {
+			continue
+		}
+		claims, err := tracking.Verify(row.SubIDs, candidate, s.SignTracking)
+		if err == nil {
+			matches++
+			publisher, c = candidate, claims
+		}
+	}
+	if matches != 1 {
+		return a, ineligible("Chữ ký tracking hoặc Affiliate ID không hợp lệ")
 	}
 	row.Publisher = publisher
-	c, e := tracking.Verify(row.SubIDs, publisher, s.SignTracking)
-	if e != nil {
-		return a, ineligible(e.Error())
-	}
 	if row.ShopID != strconv.FormatUint(c.Shop, 10) || row.ItemID != strconv.FormatUint(c.Item, 10) {
 		return a, ineligible("Sản phẩm không khớp link Hoàn Xu")
 	}

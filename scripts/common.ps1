@@ -14,7 +14,7 @@ function Get-TaskTool([string]$Name) {
     throw "Missing $Name. Read README.md for installation instructions."
 }
 function Import-TaskEnv {
-    $path = if ($env:ENV_FILE) { if ([IO.Path]::IsPathRooted($env:ENV_FILE)) { $env:ENV_FILE } else { Join-Path $TaskRoot $env:ENV_FILE } } else { Join-Path $TaskRoot '.env' }
+    $path = if ($env:ENV_FILE) { if ([IO.Path]::IsPathRooted($env:ENV_FILE)) { $env:ENV_FILE } else { Join-Path $TaskRoot $env:ENV_FILE } } elseif (Test-Path -LiteralPath (Join-Path $TaskRoot '.env.local')) { $env:ENV_FILE=Join-Path $TaskRoot '.env.local'; $env:ENV_FILE } else { Join-Path $TaskRoot '.env' }
     if (-not (Test-Path -LiteralPath $path)) { throw 'Create .env from .env.example in the backend repository first.' }
     foreach ($line in [IO.File]::ReadAllLines($path)) {
         if ($line -match '^([A-Z_]+)=(.*)$') {
@@ -32,5 +32,14 @@ function Set-TaskPostgres {
     $env:PGHOST = $connection.Host
     $env:PGPORT = if ($connection.Port -gt 0) { [string]$connection.Port } else { '5432' }
     $env:PGDATABASE = if ($Database) { $Database } else { $connection.AbsolutePath.TrimStart('/') }
+    $env:PGOPTIONS = ''
+    $env:PGSSLMODE = 'prefer'
+    foreach ($taskParameter in $connection.Query.TrimStart('?').Split('&')) {
+        $taskPair = $taskParameter.Split('=',2)
+        if ($taskPair.Length -ne 2) { continue }
+        $taskValue = [Uri]::UnescapeDataString($taskPair[1])
+        if ($taskPair[0] -eq 'search_path') { $env:PGOPTIONS = '-c search_path=' + $taskValue }
+        if ($taskPair[0] -eq 'sslmode') { $env:PGSSLMODE = $taskValue }
+    }
 }
 function Assert-TaskExit { if ($LASTEXITCODE -ne 0) { throw "Command failed (exit $LASTEXITCODE)." } }

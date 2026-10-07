@@ -17,7 +17,7 @@ go run ./tests/run.go test -run TestPeriodBoundsVietnam -v
 node --experimental-vm-modules --test tests/unit/remotebrowser/viewer.test.cjs
 ```
 
-On Windows, `./tests/run.ps1` loads the backend `.env`, requires the dedicated `TEST_DATABASE_URL` and runs tests/vet. CI uses the same Go runner. Database tests require a separate database ending in `_test`; Chromium tests require `BROWSER_TEST_PATH`.
+On Windows, `./tests/run.ps1` loads the selected profile (preferring `.env.local`), requires the dedicated `TEST_DATABASE_URL` and runs tests/vet. CI uses the same Go runner with `REQUIRE_DB_TESTS=1` and `REQUIRE_BROWSER_FIXTURES=1`, making missing PostgreSQL/Chromium fixtures an error. Database tests require a loopback database ending in `_test`; Chromium fixtures require `BROWSER_TEST_PATH`.
 
 For an explicitly authorized deployed browser, set `BROWSER_REMOTE_TEST_URL` to
 the loopback HTTP endpoint of a verified SSH tunnel and run
@@ -38,4 +38,8 @@ resolver and attribution tests use fixtures and the dedicated test database.
 
 For explicitly authorized native Shopee acceptance, an already authenticated local Chrome may be tested with `SHOPEE_LIVE_CDP_URL=http://127.0.0.1:<debug-port>` and `go run ./tests/run.go test -run TestLiveShopeeSignedSubIDs -v`. This creates one disposable short link using test attribution claims and does not access the application database. The test is skipped by default. Production attribution still requires a real report carrying the full SubIDs.
 
-Unified Shopee configuration tests cover atomic saves, conflict versions, read-only proof, asynchronous verification, stale completion, one active job per origin, disabled manual mode and diagnostics without financial writes. Migration 15 is included in each isolated API test schema. Operator native acceptance uses the same flow with `admin verify-shopee-settings --product-url <Shopee URL>` after the runtime configuration has been imported.
+Unified Shopee configuration tests cover atomic saves, conflict versions, read-only proof, asynchronous verification, stale completion, one active job per origin, disabled manual mode and diagnostics without financial writes. API fixtures discover all current migrations through version 21. Roundtrip migration tests preserve wallet balance and ledger digest. Operator native acceptance uses `admin verify-shopee-settings --product-url <Shopee URL>` after runtime configuration import.
+
+Wallet contention benchmark is opt-in with `RUN_WALLET_BENCHMARK=1`; it uses the dedicated test database and writes `tests/results/wallet-contention.json`. See `integration/api/wallet_benchmark_test.go` for the exact workload. It does not benchmark production.
+
+`RUN_IMPORT_INDEX_BENCHMARK=1` with `-run TestImportValidIndexBenchmark` compares EXPLAIN ANALYZE/BUFFERS for a 50,000-row batch after 98% is applied. It creates a disposable test schema, drops the partial index only inside a rolled-back transaction, and writes `tests/results/import-valid-index.json`.

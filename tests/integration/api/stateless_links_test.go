@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hoanxu/internal/affiliate"
 	"hoanxu/internal/cashback"
 	"hoanxu/internal/imports"
 	"hoanxu/internal/orders"
@@ -63,6 +64,10 @@ func TestSignedCSVExpiryLateImportSnapshotDuplicateAndCancellation(t *testing.T)
 	claims := tracking.Claims{CreatedAt: created, Shop: 83496725, Item: 6939920023, Policy: version, Tier: "bronze", Bps: 6600}
 	ids, e := tracking.Issue(claims, code, "123456789", "0.63", s.SignTracking)
 	if e != nil {
+		t.Fatal(e)
+	}
+	// A later publisher change must not invalidate the historical signed promise.
+	if e = (&affiliate.Service{Store: s}).SavePublisher(ctx, admin, "987654321"); e != nil {
 		t.Fatal(e)
 	}
 	base := imports.Row{NativeShopee: true, Channel: "shopee", OrderID: "ORDER1", LineID: "line-one", Tracking: ids[2], SubIDs: ids, ShopID: "83496725", ItemID: "6939920023", Name: "Product", Value: 100000, Commission: 5001, Status: "pending", Date: created.Add(time.Hour)}

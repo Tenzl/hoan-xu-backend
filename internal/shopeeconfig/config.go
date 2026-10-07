@@ -189,6 +189,13 @@ func Save(ctx context.Context, s *platform.Store, origin, actor string, in Input
 	}
 	next := old
 	next.Fields = in.Fields
+	for _, publisher := range []string{old.Publisher, next.Publisher} {
+		if publisher != "" {
+			if _, err = tx.Exec(ctx, `INSERT INTO tracking_publishers(publisher) VALUES($1) ON CONFLICT DO NOTHING`, publisher); err != nil {
+				return old, err
+			}
+		}
+	}
 	if next.Fingerprint() != old.Fingerprint() {
 		next.VerifiedAt = nil
 		next.VerifiedFingerprint = ""
