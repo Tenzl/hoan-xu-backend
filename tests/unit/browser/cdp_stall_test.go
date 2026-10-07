@@ -109,7 +109,7 @@ func TestCDPStallRecyclesOnlyWorkerAndRespectsRetryBudget(t *testing.T) {
 	done := make(chan struct{})
 	go func() { m.Run(ctx); close(done) }()
 	defer func() { cancel(); <-done }()
-	login := chromedp.FromContext(m.root).Target.TargetID
+	connection := chromedp.FromContext(m.root).Browser
 	for _, method := range []string{"Page.navigate", "Runtime.evaluate", "Network.getResponseBody"} {
 		t.Run(method, func(t *testing.T) {
 			dropped.Store(0)
@@ -125,7 +125,7 @@ func TestCDPStallRecyclesOnlyWorkerAndRespectsRetryBudget(t *testing.T) {
 			if dropped.Load() != 1 || time.Since(started) >= 10*time.Second || last.Code != "BROWSER_UNAVAILABLE" {
 				t.Fatal("stall was not bounded", m.Status())
 			}
-			if m.Status()["authenticated"] != true || m.Status()["starts"] != 1 || chromedp.FromContext(m.root).Target.TargetID != login {
+			if m.Status()["authenticated"] != true || m.Status()["starts"] != 1 || chromedp.FromContext(m.root).Browser != connection || chromedp.FromContext(m.root).Target != nil {
 				t.Fatal("worker error invalidated whole browser", m.Status())
 			}
 		})

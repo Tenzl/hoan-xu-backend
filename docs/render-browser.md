@@ -14,8 +14,9 @@ Docker build context riêng; `.dockerignore` của backend loại nó khỏi bui
 Folder `chromium/` bên cạnh repo trong workspace hiện tại là bản triển khai
 local, chứa secrets riêng và không được push.
 
-Giữ hai worker và một backend instance. Chromium chạy 24/7, có một tab dashboard
-để đăng nhập; các tab Go tạo dùng cùng default context/profile. Go không launch
+Giữ tối đa hai worker và một backend instance. Chromium chạy 24/7, có một tab dashboard
+để đăng nhập; remote checker ưu tiên dùng lại tab Affiliate đang mở trong default
+profile. Chỉ tạo thêm tab nếu chưa có tab phù hợp rảnh. Go không launch
 hoặc kill Chrome trên EC2. Không tự động import/export cookie.
 
 ## Cấu hình Render
@@ -102,23 +103,25 @@ không gửi Cookie/Authorization của user sang EC2; nó dùng bridge password
 ## Đo thời gian lấy hoa hồng
 
 Checker trả JSON khi response `/api/v3/offer/product` tải xong, không chờ
-toàn bộ trang (ảnh, analytics...) phát sự kiện `load`. Remote mode giữ tối đa
-hai tab worker đã tải dashboard, chuyển sản phẩm bằng router của Shopee để
-không khởi chạy lại JavaScript mỗi lần. Shopee vẫn tự gọi API và tạo security
-context. Probe mượn tab worker khi cả hai rảnh; tab đăng nhập của admin giữ riêng.
+toàn bộ trang (ảnh, analytics...) phát sự kiện `load`. Remote mode không tạo tab
+điều khiển trắng hoặc tải sẵn thêm tab khi chưa cần. Checker ưu tiên tab product
+offer đang mở, sau đó dashboard, rồi các trang Affiliate khác trong default
+profile. Các tab ngoài Affiliate hoặc thuộc context ẩn danh không được mượn.
+Hai worker giữ lease độc quyền, nên không điều hướng cùng một tab đồng thời.
+Probe chờ worker rảnh và dùng lại tab đó. Shopee vẫn tự gọi API và tạo security context.
 
-Lượt thành công trả tab vào pool. Lỗi, hủy hoặc timeout đóng tab đó; lượt sau
-tạo lại. Go shutdown đóng toàn bộ tab do Go tạo, giữ Chromium và tab admin.
-Khi router không tạo request sản phẩm sau 3 giây, checker mở trang theo cách
-thông thường. Kiểm tra lại đúng sản phẩm trong cùng tab cũng reload để nhận
+Lượt thành công trả tab vào pool. Tab có sẵn được giữ lại khi lỗi, hủy, timeout
+hoặc chuyển sang đăng nhập/xác minh. Tab do Go tạo bị lỗi được đóng và thay thế.
+Go shutdown đóng các tab do Go tạo, ngắt CDP trước khi giải phóng tab mượn,
+giữ Chromium và các tab có sẵn. Khi một tab bị đóng bằng tay, checker thay lease
+đã chết khi thử lại. Mỗi lượt kiểm tra điều hướng tài liệu mới trong cùng tab để nhận
 response mới; response cũ bắt đầu trước lượt kiểm tra không được chấp nhận.
 Redirect đăng nhập/xác minh (kể cả trong SPA) và API 401/403 vẫn làm phiên hết
-hiệu lực. Cả chế độ Chrome local và remote trong quản trị đều giữ hai tab worker để tái sử
-dụng; tab đăng nhập/xác minh của admin được giữ riêng. Worker lỗi hoặc timeout
-được đóng và tạo lại khi cần.
+hiệu lực. Chrome local vẫn giữ tab đăng nhập/xác minh riêng và hai tab worker.
 
-Khởi động/reconnect/kiểm tra phiên cần tải sẵn các tab trước khi trạng thái
-browser thành authenticated. API/database readiness độc lập với việc này.
+Khởi động/reconnect/kiểm tra phiên cần probe thành công trước khi trạng thái
+browser thành authenticated. Remote không tạo worker thứ hai chỉ để preload.
+API/database readiness độc lập với việc này.
 Cache 10 phút và singleflight giữ nguyên, cache bị đổi khi phiên thay đổi.
 
 Render Logs có hai bản ghi chỉ chứa thời gian và trạng thái, không chứa URL,
@@ -127,17 +130,13 @@ cookie, dữ liệu sản phẩm hoặc tài khoản:
 - `shopee_check_completed`: `resolve_ms`, `check_wait_ms`, `total_ms`,
   `cache_hit`, `shared`, `success`. `check_wait_ms` bao gồm chờ queue, browser
   và xử lý kết quả; so sánh với thời gian capture để xác định chờ worker.
-- `shopee_browser_capture`: `session_wait_ms`, `navigation_ms`,
-  `product_request_after_ms`, `product_headers_ms`, `product_ready_after_ms`,
-  `warm_navigation`, `navigation_fallback`, `total_ms`, `success`.
-  `warm_navigation=true` nghĩa là dùng router trong tab đã tải sẵn;
-  `navigation_fallback=true` nghĩa là phải mở trang thông thường sau đó.
-  Các trường `*_after_ms` tính từ lúc worker bắt đầu
-  capture; `product_headers_ms` là thời gian request đến khi nhận xong header
-  đo bởi Chromium (bao gồm DNS/TLS nếu có). `-1` nghĩa là chưa quan sát được
-  mốc tương ứng. `navigation_ms` gồm tạo tab và gửi lệnh mở trang.
+- `shopee_browser_capture`: `lease_ms`, `navigation_ms`,
+  `product_request_after_ms`, `product_headers_after_ms`, `product_ready_after_ms`,
+  `body_ms`, `total_ms`, `success`. Các trường `*_after_ms` tính từ đầu lượt capture;
+  `-1` nghĩa là chưa quan sát được mốc tương ứng. `lease_ms` gồm chờ và gắn tab;
+  `navigation_ms` là thời gian gửi lệnh điều hướng.
 
-Nếu request sản phẩm bắt đầu muộn nhưng `product_headers_ms` thấp, thời gian
+Nếu request sản phẩm bắt đầu muộn nhưng phần chờ response thấp, thời gian
 nằm ở mở tab/khởi chạy trang, chưa đủ bằng chứng thiếu RAM. Đo trên Render khi
 check sản phẩm mới và khi hai worker cùng chạy, đối chiếu RAM/CPU EC2 trước
 khi đổi instance. Đo qua tunnel máy quản trị còn bao gồm độ trễ từ máy đó,
@@ -148,8 +147,8 @@ không dùng để kết luận độ trễ Render → EC2.
 Development chọn Chrome local, đường dẫn và profile trong form **Kết nối Shopee**;
 Chrome luôn có cửa sổ. Chạy `scripts/dev.ps1` hoặc `go run ./cmd/api` như
 trước. Local không kết nối EC2: mở Chrome từ admin, đăng nhập rồi kiểm tra phiên
-để tải sẵn hai tab worker. Các sản phẩm khác nhau dùng router trong tab đã tải
-sẵn như remote; kiểm tra lại cùng sản phẩm vẫn reload để lấy response mới.
+để tải sẵn hai tab worker. Các sản phẩm được điều hướng trong tab đã tải sẵn;
+kiểm tra lại cùng sản phẩm vẫn tải tài liệu mới để lấy response mới.
 Image production mới không có Chrome local. Khi cần rollback deployment gộp,
 dùng image/backend revision cũ và giữ nguyên disk/profile cũ trước khi chuyển đổi.
 

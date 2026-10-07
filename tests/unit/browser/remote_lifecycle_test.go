@@ -192,7 +192,13 @@ func TestRemoteLifecycleCaptureAndRecovery(t *testing.T) {
 	if maxActive.Load() != 2 {
 		t.Fatal("expected two overlapping worker tabs", maxActive.Load())
 	}
-	if err := chromedp.Run(m.root, chromedp.Navigate(server.URL+"/dashboard"), chromedp.Evaluate(`localStorage.setItem('profile-fixture','saved')`, nil)); err != nil {
+	profileTab, err := m.acquireWorker(m.root, context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = chromedp.Run(profileTab.ctx, chromedp.Navigate(server.URL+"/dashboard"), chromedp.Evaluate(`localStorage.setItem('profile-fixture','saved')`, nil))
+	m.releaseWorker(profileTab, err == nil)
+	if err != nil {
 		t.Fatal(err)
 	}
 	cancel()
@@ -231,7 +237,13 @@ func TestRemoteLifecycleCaptureAndRecovery(t *testing.T) {
 	defer func() { cancel2(); <-done2 }()
 	waitState(m, "authenticated")
 	var saved string
-	if err := chromedp.Run(m.root, chromedp.Navigate(server.URL+"/dashboard"), chromedp.Evaluate(`localStorage.getItem('profile-fixture')`, &saved)); err != nil || saved != "saved" {
+	profileTab, err = m.acquireWorker(m.root, context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = chromedp.Run(profileTab.ctx, chromedp.Evaluate(`localStorage.getItem('profile-fixture')`, &saved))
+	m.releaseWorker(profileTab, err == nil)
+	if err != nil || saved != "saved" {
 		t.Fatal("profile lost on controller restart", saved, err)
 	}
 	oldWS, _ := remoteWebSocket(context.Background(), relay.URL)
@@ -263,7 +275,7 @@ func TestRemoteLifecycleCaptureAndRecovery(t *testing.T) {
 				pages++
 			}
 		}
-		if pages == 4 || time.Now().After(cleanupDeadline) {
+		if pages == 2 || time.Now().After(cleanupDeadline) {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -272,7 +284,7 @@ func TestRemoteLifecycleCaptureAndRecovery(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if pages != 4 {
+	if pages != 2 {
 		for _, info := range targets {
 			if info.Type == "page" {
 				t.Logf("remaining page %s %s", info.TargetID, info.URL)

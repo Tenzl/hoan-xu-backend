@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/chromedp/cdproto/target"
 )
 
 // NewRemote controls an independently supervised browser. Authentication lives
@@ -20,6 +22,8 @@ func NewRemote(endpoint string, options ...Option) (*Manager, error) {
 	m := NewManual("", "")
 	m.remoteURL = endpoint
 	m.autoStart = true
+	m.borrowedTargets = make(map[target.ID]bool)
+	m.workerTargets = make(map[target.ID]bool)
 	for _, option := range options {
 		option(m)
 	}

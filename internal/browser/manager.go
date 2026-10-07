@@ -28,6 +28,7 @@ type result struct {
 }
 type Manager struct {
 	mu              sync.Mutex
+	workerTargetMu  sync.Mutex
 	sessionMu       sync.RWMutex
 	lifetime        context.Context
 	autoStart       bool
@@ -46,6 +47,8 @@ type Manager struct {
 	retryAt         time.Time
 	retryDelay      time.Duration
 	ownedTargets    map[target.ID]bool
+	borrowedTargets map[target.ID]bool
+	workerTargets   map[target.ID]bool
 	root            context.Context
 	cancel          context.CancelFunc
 	allocatorCancel context.CancelFunc
@@ -88,8 +91,8 @@ func NewManaged(path, profile string, cookies *CookieStore, enabled bool, option
 func NewManual(path, profile string, options ...Option) *Manager {
 	m := NewManaged(path, profile, nil, false, WithHeadless(false))
 	m.manualLogin = true
-	// Local and remote manual browsers share the same two reusable workers.
-	// The root tab stays separate for administrator login/verification.
+	// Local sessions keep a separate root login page. Remote sessions use a
+	// page-free controller and can borrow existing Affiliate tabs for checks.
 	m.workerTabs = make(chan *workerTab, 2)
 	m.workerTabs <- nil
 	m.workerTabs <- nil
@@ -149,7 +152,9 @@ func (m *Manager) start(ctx context.Context) error {
 			m.connectionFailed()
 			return errors.New("BROWSER_UNAVAILABLE")
 		}
-		alloc, ac = chromedp.NewRemoteAllocator(ctx, ws, chromedp.NoModifyURL)
+		// Close owned worker pages before disconnecting the controller. Run's
+		// shutdown calls Close; parent cancellation must not race that cleanup.
+		alloc, ac = chromedp.NewRemoteAllocator(context.WithoutCancel(ctx), ws, chromedp.NoModifyURL)
 	} else {
 		opts := append([]chromedp.ExecAllocatorOption{}, chromedp.DefaultExecAllocatorOptions[:]...)
 		opts = append(opts, chromedp.UserDataDir(m.profile), chromedp.WSURLReadTimeout(10*time.Second), chromedp.Flag("headless", m.headless))
@@ -167,7 +172,18 @@ func (m *Manager) start(ctx context.Context) error {
 		connectTimeout = 30 * time.Second
 	}
 	timer := time.AfterFunc(connectTimeout, func() { ac() })
-	if e := chromedp.Run(root); e != nil {
+	var connectErr error
+	if m.remoteURL != "" {
+		// Allocate the CDP connection without creating a controller page. Workers
+		// can attach directly to the administrator's already open Affiliate tab.
+		_, connectErr = chromedp.Targets(root)
+		if connectErr == nil {
+			connectErr = target.SetDiscoverTargets(true).Do(cdp.WithExecutor(root, chromedp.FromContext(root).Browser))
+		}
+	} else {
+		connectErr = chromedp.Run(root)
+	}
+	if connectErr != nil {
 		timer.Stop()
 		rc()
 		ac()
@@ -175,7 +191,7 @@ func (m *Manager) start(ctx context.Context) error {
 			m.connectionFailed()
 			return errors.New("BROWSER_UNAVAILABLE")
 		}
-		return e
+		return connectErr
 	}
 	timer.Stop()
 	if m.remoteURL != "" {
@@ -183,7 +199,7 @@ func (m *Manager) start(ctx context.Context) error {
 		// targets this controller created; never touch the native login tab.
 		cleanup, stopCleanup := context.WithTimeout(root, 5*time.Second)
 		browserCtx := cdp.WithExecutor(cleanup, chromedp.FromContext(root).Browser)
-		remaining := map[target.ID]bool{chromedp.FromContext(root).Target.TargetID: true}
+		remaining := map[target.ID]bool{}
 		infos, inspectErr := target.GetTargets().Do(browserCtx)
 		live := make(map[target.ID]bool, len(infos))
 		for _, info := range infos {
@@ -617,7 +633,10 @@ func (m *Manager) trackTarget() chromedp.Action {
 	return chromedp.ActionFunc(func(ctx context.Context) error {
 		if m.remoteURL != "" {
 			m.mu.Lock()
-			m.ownedTargets[chromedp.FromContext(ctx).Target.TargetID] = true
+			id := chromedp.FromContext(ctx).Target.TargetID
+			if !m.borrowedTargets[id] {
+				m.ownedTargets[id] = true
+			}
 			m.mu.Unlock()
 		}
 		return nil

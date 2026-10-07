@@ -40,6 +40,8 @@ func (m *Manager) captureAttemptWithLink(lifetime, request context.Context, item
 	started := time.Now()
 	leaseCtx, stopLease := context.WithTimeout(request, 20*time.Second)
 	defer stopLease()
+	stopLifetimeLease := context.AfterFunc(lifetime, stopLease)
+	defer stopLifetimeLease()
 	phase := "lease"
 	var leaseTime, navigationTime, bodyTime time.Duration
 	var mu sync.Mutex
@@ -71,6 +73,9 @@ func (m *Manager) captureAttemptWithLink(lifetime, request context.Context, item
 		}
 	}
 	defer m.sessionMu.RUnlock()
+	if leaseCtx.Err() != nil {
+		return nil, leaseCtx.Err()
+	}
 	if request.Err() != nil {
 		return nil, request.Err()
 	}
@@ -117,7 +122,11 @@ func (m *Manager) captureAttemptWithLink(lifetime, request context.Context, item
 			if captureErr != nil {
 				code = captureErr.Error()
 			}
-			slog.Info("shopee_worker_replaced", "attempt", attempt, "reason", code, "phase", phase)
+			event := "shopee_worker_replaced"
+			if w.borrowed && w.ctx.Err() == nil && !w.closed.Load() {
+				event = "shopee_worker_retained"
+			}
+			slog.Info(event, "attempt", attempt, "reason", code, "phase", phase)
 		}
 		m.mu.Lock()
 		if !m.running() {
@@ -131,6 +140,8 @@ func (m *Manager) captureAttemptWithLink(lifetime, request context.Context, item
 	defer cancel()
 	stopRequest := context.AfterFunc(request, cancel)
 	defer stopRequest()
+	stopLifetime := context.AfterFunc(lifetime, cancel)
+	defer stopLifetime()
 	type capturedResponse struct {
 		id     network.RequestID
 		loader cdp.LoaderID
@@ -171,6 +182,7 @@ func (m *Manager) captureAttemptWithLink(lifetime, request context.Context, item
 	// Both listeners have this job's scope and are removed on its cancellation.
 	chromedp.ListenBrowser(scope, func(ev any) {
 		if e, ok := ev.(*target.EventTargetDestroyed); ok && e.TargetID == chromedp.FromContext(tab).Target.TargetID {
+			w.closed.Store(true)
 			sendFailure(failure("BROWSER_UNAVAILABLE", "target", true))
 		}
 	})
