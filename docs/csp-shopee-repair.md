@@ -76,7 +76,7 @@ do. Không log URL đầy đủ, body, cookie, token hoặc thông tin tài kho�
 Chạy từ thư mục backend bằng Go đã cài hoặc `.tools/go/bin/go.exe`:
 
 ```powershell
-$env:BROWSER_TEST_PATH='C:/Program Files/Google/Chrome/Application/chrome.exe'
+$env:BROWSER_TEST_PATH=(Get-ChildItem "$env:LOCALAPPDATA/ms-playwright/chromium-*/chrome-win64/chrome.exe" -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
 go run ./tests/run.go test -timeout 180s
 go run ./tests/run.go vet
 ```

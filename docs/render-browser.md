@@ -169,7 +169,7 @@ và bridge secret. `CHROME_SSH_TUNNEL_ENABLED=false` chỉ dùng với Docker te
 tunnel được quản lý bên ngoài; không trỏ CDP ra địa chỉ public.
 
 ```powershell
-$env:BROWSER_TEST_PATH='C:/Program Files/Google/Chrome/Application/chrome.exe'
+$env:BROWSER_TEST_PATH=(Get-ChildItem "$env:LOCALAPPDATA/ms-playwright/chromium-*/chrome-win64/chrome.exe" -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
 go run ./tests/run.go
 go run ./tests/run.go vet
 go build ./cmd/api ./cmd/admin
