@@ -26,7 +26,7 @@ func TestTaxSnapshotUsesArchivedPolicyAndActualCommission(t *testing.T) {
 		t.Fatalf("default tax: %v", current.Tax)
 	}
 	tiers := []cashback.Tier{{Code: "bronze", MinGold: 0, Min: 6500, Max: 7500}, {Code: "platinum", MinGold: 30, Min: 7500, Max: 8500}, {Code: "diamond", MinGold: 100, Min: 8500, Max: 9500}}
-	if _, err = policies.Create(ctx, admin, "tax-policy-first", periodFixtureInput(current.ID,tiers,500)); err != nil {
+	if _, err = policies.Create(ctx, admin, "tax-policy-first", periodFixtureInput(current.ID, tiers, 500)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.Pool.Exec(ctx, `UPDATE affiliate_channels SET status='available',settings='{"publisher":"fixture"}' WHERE id='shopee'`); err != nil {
@@ -60,7 +60,14 @@ func TestTaxSnapshotUsesArchivedPolicyAndActualCommission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = policies.Create(ctx, admin, "tax-policy-second", periodFixtureInput(current.ID,tiers,10000)); err != nil {
+	if _, err = policies.Create(ctx, admin, "tax-policy-second", periodFixtureInput(current.ID, tiers, 10000)); err != nil {
+		t.Fatal(err)
+	}
+	reused, err := service.CreateLink(ctx, customer, "https://shopee.vn/product/1/2")
+	if err != nil || reused.(map[string]any)["reused"] != true || fixture.ids != ids {
+		t.Fatal("reusing link changed the archived tax snapshot", reused, err)
+	}
+	if err = service.DeleteLink(ctx, customer, result["id"].(string)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.CreateLink(ctx, customer, "https://shopee.vn/product/1/2"); err != nil {
@@ -129,7 +136,7 @@ func TestTaxSnapshotUsesArchivedPolicyAndActualCommission(t *testing.T) {
 		}
 	}
 	var count int
-	if err = s.Pool.QueryRow(ctx, `SELECT count(*) FROM affiliate_links`).Scan(&count); err != nil || count != 2 {
+	if err = s.Pool.QueryRow(ctx, `SELECT count(*) FROM affiliate_links`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("saved links: %d %v", count, err)
 	}
 }

@@ -100,7 +100,7 @@ func TestPurchasesFeedOwnsFiltersAndPreservesDeletedAndLegacyLinks(t *testing.T)
 		}
 		if link["id"] == progress {
 			matched++
-			if link["canDelete"] != false || record["kind"] != "order" || link["productName"] != "Tracked product" {
+			if link["canDelete"] != true || record["kind"] != "order" || link["productName"] != "Tracked product" {
 				t.Fatal(record)
 			}
 		}
@@ -178,6 +178,9 @@ func TestCreatedLinkIncludesProductName(t *testing.T) {
 	if err := s.Pool.QueryRow(ctx, `SELECT product_name FROM affiliate_links WHERE id=$1`, value.(map[string]any)["id"]).Scan(&stored); err != nil || stored != "Shopee product" {
 		t.Fatal("product name was not persisted", stored, err)
 	}
+	if err := svc.DeleteLink(ctx, user, value.(map[string]any)["id"].(string)); err != nil {
+		t.Fatal(err)
+	}
 	for _, invalid := range []map[string]any{
 		{"schemaVerified": false, "shopId": "1", "itemId": "2", "productName": "Unverified"},
 		{"schemaVerified": true, "shopId": "1", "itemId": "3", "productName": "Different product"},
@@ -191,7 +194,7 @@ func TestCreatedLinkIncludesProductName(t *testing.T) {
 		}
 	}
 	var count int
-	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM affiliate_links WHERE user_id=$1`, user).Scan(&count); err != nil || count != 1 {
+	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM affiliate_links WHERE user_id=$1`, user).Scan(&count); err != nil || count != 0 {
 		t.Fatal("invalid product created a link", count, err)
 	}
 }

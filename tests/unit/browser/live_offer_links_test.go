@@ -53,8 +53,8 @@ func TestLiveShopeeSignedSubIDs(t *testing.T) {
 		t.Fatal(e)
 	}
 	claims, e := tracking.Verify(ids, "acceptance-test", store.SignTracking)
-	if e != nil || claims.Version != 2 || claims.ExpiresAt().Sub(claims.CreatedAt) != 144*time.Hour {
-		t.Fatal("expected v2 six-day token", claims, e)
+	if e != nil || claims.Version != tracking.CurrentVersion || claims.ExpiresAt().Sub(claims.CreatedAt) != tracking.Lifetime {
+		t.Fatal("expected current five-day token", claims, e)
 	}
 	short, e := m.CreateOfferLink(ctx, "83496725", "6939920023", ids)
 	if e != nil {

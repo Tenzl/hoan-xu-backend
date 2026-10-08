@@ -26,7 +26,8 @@ func (s *Service) CreateLinkOperation(ctx context.Context, user, key, raw string
 		var link *string
 		var code, message *string
 		var httpStatus *int
-		err = s.Store.Pool.QueryRow(ctx, `SELECT payload_hash,status,response||jsonb_build_object('canDelete',false),link_id::text,error_status,error_code,error_message FROM link_operations WHERE user_id=$1 AND key=$2`, user, key).Scan(&existing, &status, &response, &link, &httpStatus, &code, &message)
+		var deleted bool
+		err = s.Store.Pool.QueryRow(ctx, `SELECT op.payload_hash,op.status,op.response||jsonb_build_object('canDelete',l.tracking_sub_ids IS NOT NULL AND l.deleted_at IS NULL,'status',CASE WHEN l.tracking_sub_ids IS NULL THEN 'legacy' ELSE 'active' END,'autoDeleteAt',l.created_at+interval '120 hours'),op.link_id::text,op.error_status,op.error_code,op.error_message,(l.id IS NULL OR l.deleted_at IS NOT NULL OR l.created_at<=now()-interval '120 hours') FROM link_operations op LEFT JOIN affiliate_links l ON l.id=op.link_id AND l.user_id=op.user_id WHERE op.user_id=$1 AND op.key=$2`, user, key).Scan(&existing, &status, &response, &link, &httpStatus, &code, &message, &deleted)
 		if err != nil {
 			return nil, err
 		}
@@ -35,7 +36,7 @@ func (s *Service) CreateLinkOperation(ctx context.Context, user, key, raw string
 		}
 		switch status {
 		case "succeeded":
-			if link == nil {
+			if link == nil || deleted {
 				return nil, platform.Fail(410, "LINK_DELETED", "Link của yêu cầu này đã bị xóa.")
 			}
 			return json.RawMessage(response), nil

@@ -12,14 +12,14 @@ const purchasesSQL = `WITH entries AS (
  SELECT md5('link:'||l.id::text)::uuid AS id,l.created_at AS sort_at,
  CASE WHEN l.tracking_sub_ids IS NULL THEN 'legacy' WHEN l.expires_at<=now() OR l.lifecycle_status='cancelled' THEN 'rejected' ELSE 'selecting' END AS status,
  'link'::text AS kind,l.id AS link_id,NULL::uuid AS order_id
- FROM affiliate_links l WHERE l.user_id=$1 AND NOT EXISTS(
+ FROM affiliate_links l WHERE l.user_id=$1 AND l.deleted_at IS NULL AND NOT EXISTS(
  SELECT 1 FROM orders o WHERE o.user_id=$1 AND (o.link_id=l.id OR o.tracking_code=l.tracking_code))
  UNION ALL
  SELECT md5('order:'||o.id::text)::uuid,o.ordered_at,
  CASE o.status WHEN 'pending' THEN 'progress' WHEN 'approved' THEN 'completed' ELSE 'rejected' END,
  'order',linked.id,o.id
  FROM orders o LEFT JOIN LATERAL (
- SELECT l.id FROM affiliate_links l WHERE l.user_id=$1 AND (o.link_id=l.id OR o.tracking_code=l.tracking_code)
+ SELECT l.id FROM affiliate_links l WHERE l.user_id=$1 AND l.deleted_at IS NULL AND (o.link_id=l.id OR o.tracking_code=l.tracking_code)
  ORDER BY (o.link_id=l.id) DESC NULLS LAST,l.id LIMIT 1
  ) linked ON true WHERE o.user_id=$1
 )

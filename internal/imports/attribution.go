@@ -67,7 +67,7 @@ func Attribute(ctx context.Context, tx pgx.Tx, s *platform.Store, row *Row) (Att
 		return a, ineligible("Sản phẩm không khớp link Hoàn Xu")
 	}
 	if !c.Eligible(row.Date) {
-		return a, ineligible("Order Time nằm ngoài thời hạn hoàn Xu của link")
+		return a, ineligible("Order Time trước thời điểm phát hành tracking")
 	}
 	e = tx.QueryRow(ctx, `SELECT id::text FROM users WHERE tracking_code=$1 AND role='customer' AND NOT blocked`, row.SubIDs[0]).Scan(&a.User)
 	if e == pgx.ErrNoRows {

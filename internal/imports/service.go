@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/jackc/pgx/v5"
 	"hoanxu/internal/cashback"
+	"hoanxu/internal/orders"
 	"hoanxu/internal/platform"
 	"log/slog"
 	"time"
@@ -68,7 +69,7 @@ func (s *Service) PreviewFile(ctx context.Context, actor, filename, hash, fileID
 	if e = platform.Audit(ctx, tx, actor, "import_preview", id, counts); e != nil {
 		return nil, e
 	}
-	return map[string]any{"id": id, "counts": counts, "status": "preview"}, tx.Commit(ctx)
+	return map[string]any{"id": id, "filename": filename, "counts": counts, "status": "preview"}, tx.Commit(ctx)
 }
 func (s *Service) Commit(ctx context.Context, actor, key, id string) (any, error) {
 	return s.Store.Action(ctx, actor, key, "import-commit:"+id, map[string]string{"id": id}, func(tx pgx.Tx) (any, error) {
@@ -86,7 +87,7 @@ func (s *Service) Commit(ctx context.Context, actor, key, id string) (any, error
 		if invalid > 0 {
 			return nil, platform.Fail(422, "CSV_ERRORS", "Cần sửa lỗi cấu trúc trước khi commit.")
 		}
-		_, e := tx.Exec(ctx, `UPDATE import_batches SET status='queued' WHERE id=$1`, id)
+		_, e := tx.Exec(ctx, `UPDATE import_batches SET status='queued',committed_by=$2 WHERE id=$1`, id, actor)
 		return map[string]string{"id": id, "status": "queued"}, e
 	})
 }
@@ -193,6 +194,7 @@ func (s *Service) applyOne(ctx context.Context, batch string) (bool, error) {
 	if validation != "valid" {
 		status = validation
 	} else {
+		var appliedOrderID string
 		if row.NativeShopee {
 			if e = platform.LockTracking(ctx, tx, a.User, row.Tracking); e != nil {
 				return false, e
@@ -205,7 +207,7 @@ func (s *Service) applyOne(ctx context.Context, batch string) (bool, error) {
 		var oldCommission, oldValue int64
 		var oldBps int
 		var internalRejection bool
-		e = tx.QueryRow(ctx, `SELECT status,commission,value,share_bps,cashback_mode,coalesce(tracking_code,''),internally_rejected FROM orders WHERE channel=$1 AND publisher=$2 AND external_id=$3 AND line_id=$4 FOR UPDATE`, row.Channel, row.Publisher, row.OrderID, row.LineID).Scan(&oldStatus, &oldCommission, &oldValue, &oldBps, &mode, &trackingCode, &internalRejection)
+		e = tx.QueryRow(ctx, `SELECT id::text,status,commission,value,share_bps,cashback_mode,coalesce(tracking_code,''),internally_rejected FROM orders WHERE channel=$1 AND publisher=$2 AND external_id=$3 AND line_id=$4 FOR UPDATE`, row.Channel, row.Publisher, row.OrderID, row.LineID).Scan(&appliedOrderID, &oldStatus, &oldCommission, &oldValue, &oldBps, &mode, &trackingCode, &internalRejection)
 		if e == nil {
 			if trackingCode != "" && trackingCode != row.Tracking {
 				status = "ignored"
@@ -228,7 +230,8 @@ func (s *Service) applyOne(ctx context.Context, batch string) (bool, error) {
 						cash = 0
 						next = "rejected"
 					}
-					_, e = tx.Exec(ctx, `UPDATE orders SET source_status=$8,product_name=$5,value=$6,commission=$7,cashback=$9,status=$10,ordered_at=$11 WHERE channel=$1 AND publisher=$2 AND external_id=$3 AND line_id=$4`, row.Channel, row.Publisher, row.OrderID, row.LineID, row.Name, row.Value, row.Commission, row.Status, cash, next, row.Date)
+					report, _ := json.Marshal(row.ReportMetadata)
+					_, e = tx.Exec(ctx, `UPDATE orders SET source_status=$8,product_name=$5,value=$6,commission=$7,cashback=$9,status=$10,ordered_at=$11,source_report=CASE WHEN $13::boolean THEN $12::jsonb ELSE source_report END WHERE channel=$1 AND publisher=$2 AND external_id=$3 AND line_id=$4`, row.Channel, row.Publisher, row.OrderID, row.LineID, row.Name, row.Value, row.Commission, row.Status, cash, next, row.Date, report, row.NativeShopee)
 					if e != nil {
 						return false, e
 					}
@@ -236,12 +239,25 @@ func (s *Service) applyOne(ctx context.Context, batch string) (bool, error) {
 				}
 			}
 		} else if errors.Is(e, pgx.ErrNoRows) {
-			_, _, e = InsertAttributedOrder(ctx, tx, &row, a)
+			appliedOrderID, _, e = InsertAttributedOrder(ctx, tx, &row, a)
 			if e != nil {
 				return false, e
 			}
 		} else {
 			return false, e
+		}
+		if status == "applied" && !internalRejection && row.AutoApproveEligible() {
+			var actor string
+			if e = tx.QueryRow(ctx, `SELECT coalesce(committed_by::text,'') FROM import_batches WHERE id=$1`, batch).Scan(&actor); e != nil {
+				return false, e
+			}
+			// Batches committed before this feature remain manual review.
+			if actor != "" {
+				_, e = (&orders.Service{Store: s.Store}).EventTx(ctx, tx, actor, appliedOrderID, orders.Event{Action: "approved", Reason: "Shopee xác nhận đơn và hoa hồng hoàn thành"}, map[string]any{"origin": "shopee_report", "batchId": batch, "rowNumber": number})
+				if e != nil {
+					return false, e
+				}
+			}
 		}
 	}
 

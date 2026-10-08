@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,8 +49,8 @@ func TestCustomerTrackingIsStableAcrossShopeeLinksAndIsolatedBetweenCustomers(t 
 	f := &offerLinkFixture{}
 	aff := &affiliate.Service{Store: s, Enabled: true, TrackingVerified: true, ProductLookup: verifiedLinkProduct, LinkGenerator: f}
 	seen := map[string]bool{}
-	for _, tc := range []struct{ user, code string }{{customer, customerCode}, {customer, customerCode}, {other, otherCode}} {
-		result, err := aff.CreateLink(ctx, tc.user, "https://shopee.vn/product/83496725/6939920023")
+	for i, tc := range []struct{ user, code string }{{customer, customerCode}, {customer, customerCode}, {other, otherCode}} {
+		result, err := aff.CreateLink(ctx, tc.user, fmt.Sprintf("https://shopee.vn/product/83496725/%d", 6939920023+i%2))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -86,11 +87,11 @@ func TestCreateLinkPersistsSignedSnapshotWithoutCreatingOrders(t *testing.T) {
 	if e := s.Pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM affiliate_links)+(SELECT count(*) FROM orders)`).Scan(&count); e != nil || count != 1 {
 		t.Fatal("generation must save one link only", count, e)
 	}
-	if l["id"] == nil || l["status"] != "active" || l["canDelete"] != false || l["affiliateUrl"] != "https://s.shopee.vn/3B7ybQjO2E" || l["payoutFactor"] == nil || l["expiresAt"] == nil || len(f.ids[2]) != 49 || f.ids[3] == "" || len(f.ids[4]) != 32 {
+	if l["id"] == nil || l["status"] != "active" || l["canDelete"] != true || l["affiliateUrl"] != "https://s.shopee.vn/3B7ybQjO2E" || l["payoutFactor"] == nil || l["expiresAt"] == nil || len(f.ids[2]) != 49 || f.ids[3] == "" || len(f.ids[4]) != 32 {
 		t.Fatal(l, f.ids)
 	}
 	f.err = errors.New("SHOPEE_UPSTREAM_FAILED")
-	if _, err = aff.CreateLink(ctx, customer, "https://shopee.vn/product/83496725/6939920023"); err == nil {
+	if _, err = aff.CreateLink(ctx, customer, "https://shopee.vn/product/83496725/6939920024"); err == nil {
 		t.Fatal("failed generation returned a long URL")
 	}
 	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM affiliate_links WHERE user_id=$1`, customer).Scan(&count); err != nil || count != 1 {
@@ -109,7 +110,7 @@ func configureLinkPolicy(t *testing.T, s *platform.Store) {
 	}
 }
 
-func TestSavedLinkHTTPReturns200AndDatabaseID(t *testing.T) {
+func TestSavedLinkHTTPReturns201ForNewAnd200ForReused(t *testing.T) {
 	s, customer, _ := testStore(t)
 	configureLinkPolicy(t, s)
 	ctx := context.Background()
@@ -142,16 +143,26 @@ func TestSavedLinkHTTPReturns200AndDatabaseID(t *testing.T) {
 		r.Header.Set("Idempotency-Key", platform.Token())
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, r)
-		if w.Code != 200 {
+		expected := 200
+		if i == 0 {
+			expected = 201
+		}
+		if w.Code != expected {
 			t.Fatal(w.Code, w.Body.String())
+		}
+		if i == 0 && !strings.HasPrefix(w.Header().Get("Location"), "/api/v1/affiliate-links/") {
+			t.Fatal("new link omitted Location", w.Header())
 		}
 		var response struct{ Data map[string]any }
 		if json.Unmarshal(w.Body.Bytes(), &response) != nil || response.Data["id"] == nil || response.Data["expiresAt"] == nil || response.Data["payoutFactor"] == nil {
 			t.Fatal(w.Body.String())
 		}
+		if response.Data["autoDeleteAt"] == nil || response.Data["reused"] != (i > 0) {
+			t.Fatal("retention/reuse metadata", response.Data)
+		}
 	}
 	var n int
-	if e = s.Pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM affiliate_links)+(SELECT count(*) FROM orders)`).Scan(&n); e != nil || n != 5 {
-		t.Fatal("expected five saved links and no orders", n, e)
+	if e = s.Pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM affiliate_links)+(SELECT count(*) FROM orders)`).Scan(&n); e != nil || n != 1 {
+		t.Fatal("expected one saved link and no orders", n, e)
 	}
 }

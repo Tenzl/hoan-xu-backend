@@ -13,6 +13,37 @@ import (
 var exactID = regexp.MustCompile(`^[0-9]+$`)
 var orderID = regexp.MustCompile(`^[A-Za-z0-9]+$`)
 
+var reportMoney = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)?$`)
+
+// Floor decimal VND without passing through binary floating point.
+func parseReportMoney(raw string) (int64, error) {
+	if len(raw) > 64 || !reportMoney.MatchString(raw) {
+		return 0, errors.New("Số tiền không hợp lệ")
+	}
+	parts := strings.SplitN(raw, ".", 2)
+	whole, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || whole > 1e12 || (whole == 1e12 && len(parts) == 2 && strings.Trim(parts[1], "0") != "") {
+		return 0, errors.New("Số tiền vượt giới hạn")
+	}
+	return whole, nil
+}
+
+func shopeeStatus(orderRaw, itemRaw string) (string, error) {
+	order, item := strings.ToLower(strings.TrimSpace(orderRaw)), strings.ToLower(strings.TrimSpace(itemRaw))
+	knownOrder := map[string]bool{"pending": true, "unpaid": true, "processing": true, "ongoing": true, "completed": true, "complete": true, "cancelled": true, "canceled": true}
+	knownItem := map[string]bool{"pending": true, "unpaid": true, "processing": true, "ongoing": true, "approved": true, "validated": true, "completed": true, "complete": true, "cancelled": true, "canceled": true, "rejected": true, "invalid": true}
+	if !knownOrder[order] || !knownItem[item] {
+		return "", errors.New("Trạng thái Shopee chưa được nhận diện")
+	}
+	if order == "cancelled" || order == "canceled" || item == "cancelled" || item == "canceled" || item == "rejected" || item == "invalid" {
+		return "rejected", nil
+	}
+	if (order == "completed" || order == "complete") && (item == "approved" || item == "validated" || item == "completed" || item == "complete") {
+		return "approved", nil
+	}
+	return "pending", nil
+}
+
 func parseShopee(r *csv.Reader, header []string) ([]Row, error) {
 	columns := map[string]int{}
 	for i, h := range header {
@@ -40,8 +71,20 @@ func parseShopee(r *csv.Reader, header []string) ([]Row, error) {
 		if len(out) >= 50000 {
 			return nil, errors.New("CSV tối đa 50.000 dòng")
 		}
-		get := func(k string) string { return strings.TrimSpace(record[columns[k]]) }
+		get := func(k string) string {
+			if index, ok := columns[k]; ok {
+				return strings.TrimSpace(record[index])
+			}
+			return ""
+		}
 		row := Row{NativeShopee: true, Channel: "shopee", OrderID: get("Order id"), ConversionID: get("Conversion id"), ShopID: get("Shop id"), ItemID: get("Item id"), ModelID: get("Model id"), PromotionID: get("Promotion id"), Name: get("Item Name")}
+		if row.PromotionID == "" {
+			row.PromotionID = "0"
+		}
+		row.ReportMetadata = ReportMetadata{ReportChannel: get("Channel"), ShopeeOrderStatus: get("Order Status"), AffiliateItemStatus: get("Affiliate Item Status"), ReportedValue: get("Purchase Value(₫)"), ReportedCommission: get("Item Total Commission(₫)")}
+		if len(row.ReportChannel) > 128 || len(row.ShopeeOrderStatus) > 64 || len(row.AffiliateItemStatus) > 64 {
+			row.Error = "Thông tin nguồn Shopee quá dài"
+		}
 		for i := range row.SubIDs {
 			row.SubIDs[i] = get("Sub_id" + strconv.Itoa(i+1))
 			if len(row.SubIDs[i]) > 50 {
@@ -68,24 +111,17 @@ func parseShopee(r *csv.Reader, header []string) ([]Row, error) {
 			row.Error = "Order Time phải có ngày và giờ đầy đủ (giờ Việt Nam); không nhận ########"
 		}
 		money := func(k string) int64 {
-			v, err := strconv.ParseInt(get(k), 10, 64)
-			if err != nil || v < 0 || v > 1e12 {
-				row.Error = "Cột " + k + " cần số nguyên VND không âm"
+			v, err := parseReportMoney(get(k))
+			if err != nil {
+				row.Error = "Cột " + k + " cần số VND không âm, tối đa 1.000.000.000.000"
 			}
 			return v
 		}
 		row.Value = money("Purchase Value(₫)")
 		row.Commission = money("Item Total Commission(₫)")
-		order, item := strings.ToLower(get("Order Status")), strings.ToLower(get("Affiliate Item Status"))
-		switch {
-		case order == "cancelled" || order == "canceled" || item == "cancelled" || item == "canceled" || item == "rejected" || item == "invalid":
-			row.Status = "rejected"
-		case (order == "completed" || order == "complete") && (item == "approved" || item == "validated" || item == "completed" || item == "complete"):
-			row.Status = "approved"
-		case order == "pending" || order == "unpaid" || order == "processing" || order == "ongoing" || order == "completed" || order == "complete":
-			row.Status = "pending"
-		default:
-			row.Error = "Trạng thái Shopee chưa được nhận diện"
+		row.Status, e = shopeeStatus(row.ShopeeOrderStatus, row.AffiliateItemStatus)
+		if e != nil {
+			row.Error = e.Error()
 		}
 		if row.Name == "" || len(row.Name) > 500 {
 			row.Error = "Tên sản phẩm thiếu hoặc quá dài"

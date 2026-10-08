@@ -14,14 +14,15 @@ import (
 )
 
 type GiftInput struct {
-	Name        string `json:"name"`
-	Channel     string `json:"channel,omitempty"`
-	ImageURL    string `json:"imageUrl,omitempty"`
-	Description string `json:"description,omitempty"`
-	CostXu      int64  `json:"costXu"`
-	Stock       int    `json:"stock"`
-	Active      bool   `json:"active"`
-	Icon        string `json:"icon"`
+	Name           string `json:"name"`
+	Channel        string `json:"channel,omitempty"`
+	ImageURL       string `json:"imageUrl,omitempty"`
+	ImagePositionY *int   `json:"imagePositionY,omitempty"`
+	Description    string `json:"description,omitempty"`
+	CostXu         int64  `json:"costXu"`
+	Stock          int    `json:"stock"`
+	Active         bool   `json:"active"`
+	Icon           string `json:"icon"`
 }
 type Gift struct {
 	ID       string `json:"id"`
@@ -30,15 +31,16 @@ type Gift struct {
 	GiftInput
 }
 type GiftPatch struct {
-	Name          *string `json:"name"`
-	Channel       *string `json:"channel"`
-	CostXu        *int64  `json:"costXu"`
-	Stock         *int    `json:"stock"`
-	ExpectedStock *int    `json:"expectedStock"`
-	Active        *bool   `json:"active"`
-	Icon          *string `json:"icon"`
-	ImageURL      *string `json:"imageUrl,omitempty"`
-	Description   *string `json:"description,omitempty"`
+	Name           *string `json:"name"`
+	Channel        *string `json:"channel"`
+	CostXu         *int64  `json:"costXu"`
+	Stock          *int    `json:"stock"`
+	ExpectedStock  *int    `json:"expectedStock"`
+	Active         *bool   `json:"active"`
+	Icon           *string `json:"icon"`
+	ImageURL       *string `json:"imageUrl,omitempty"`
+	ImagePositionY *int    `json:"imagePositionY,omitempty"`
+	Description    *string `json:"description,omitempty"`
 }
 
 func validGift(p GiftInput) bool {
@@ -49,7 +51,8 @@ func validGift(p GiftInput) bool {
 			icon = true
 		}
 	}
-	return platform.Text(p.Name, 1, 80) && p.CostXu > 0 && p.CostXu <= 1000000000000 && p.Stock >= 0 && p.Stock <= 100000 && channel && icon && len([]rune(p.Description)) <= 2000 && validGiftImage(p.ImageURL)
+	position := p.ImagePositionY == nil || (*p.ImagePositionY >= 0 && *p.ImagePositionY <= 100)
+	return platform.Text(p.Name, 1, 80) && p.CostXu > 0 && p.CostXu <= 1000000000000 && p.Stock >= 0 && p.Stock <= 100000 && channel && icon && position && len([]rune(p.Description)) <= 2000 && validGiftImage(p.ImageURL)
 }
 func validGiftImage(value string) bool {
 	if value == "" {
@@ -72,14 +75,14 @@ func (s *Service) CreateGift(ctx context.Context, actor, key string, p GiftInput
 	}
 	return s.Store.Action(ctx, actor, key, "gift-create", p, func(tx pgx.Tx) (any, error) {
 		var id string
-		if e := tx.QueryRow(ctx, `INSERT INTO gift_catalog(id,name,channel,cost,stock,active,icon,image_url,description) VALUES(gen_random_uuid()::text,$1,nullif($2,''),$3,$4,$5,$6,$7,$8) RETURNING id`, p.Name, p.Channel, p.CostXu, p.Stock, p.Active, p.Icon, p.ImageURL, p.Description).Scan(&id); e != nil {
+		if e := tx.QueryRow(ctx, `INSERT INTO gift_catalog(id,name,channel,cost,stock,active,icon,image_url,description,image_position_y) VALUES(gen_random_uuid()::text,$1,nullif($2,''),$3,$4,$5,$6,$7,$8,coalesce($9,50)) RETURNING id`, p.Name, p.Channel, p.CostXu, p.Stock, p.Active, p.Icon, p.ImageURL, p.Description, p.ImagePositionY).Scan(&id); e != nil {
 			return nil, e
 		}
 		return Gift{ID: id, CostUnit: "xu", Currency: "green", GiftInput: p}, platform.Audit(ctx, tx, actor, "gift_created", id, p)
 	})
 }
 func (s *Service) UpdateGift(ctx context.Context, actor, id, key string, p GiftPatch) (any, error) {
-	if p.Name == nil && p.Channel == nil && p.CostXu == nil && p.Stock == nil && p.Active == nil && p.Icon == nil && p.ImageURL == nil && p.Description == nil {
+	if p.Name == nil && p.Channel == nil && p.CostXu == nil && p.Stock == nil && p.Active == nil && p.Icon == nil && p.ImageURL == nil && p.Description == nil && p.ImagePositionY == nil {
 		return nil, platform.Fail(422, "VALIDATION_ERROR", "Cần chọn thông tin quà để cập nhật.")
 	}
 	if p.Stock != nil && p.ExpectedStock == nil {
@@ -87,7 +90,7 @@ func (s *Service) UpdateGift(ctx context.Context, actor, id, key string, p GiftP
 	}
 	return s.Store.Action(ctx, actor, key, "gift-update:"+id, p, func(tx pgx.Tx) (any, error) {
 		g := Gift{ID: id, CostUnit: "xu", Currency: "green"}
-		e := tx.QueryRow(ctx, `SELECT name,coalesce(channel,''),cost,stock,active,icon,image_url,description FROM gift_catalog WHERE id=$1 FOR UPDATE`, id).Scan(&g.Name, &g.Channel, &g.CostXu, &g.Stock, &g.Active, &g.Icon, &g.ImageURL, &g.Description)
+		e := tx.QueryRow(ctx, `SELECT name,coalesce(channel,''),cost,stock,active,icon,image_url,description,image_position_y FROM gift_catalog WHERE id=$1 FOR UPDATE`, id).Scan(&g.Name, &g.Channel, &g.CostXu, &g.Stock, &g.Active, &g.Icon, &g.ImageURL, &g.Description, &g.ImagePositionY)
 		if errors.Is(e, pgx.ErrNoRows) {
 			return nil, platform.Fail(404, "NOT_FOUND", "Không có quà này.")
 		}
@@ -121,10 +124,13 @@ func (s *Service) UpdateGift(ctx context.Context, actor, id, key string, p GiftP
 		if p.Description != nil {
 			g.Description = *p.Description
 		}
+		if p.ImagePositionY != nil {
+			g.ImagePositionY = p.ImagePositionY
+		}
 		if !validGift(g.GiftInput) {
 			return nil, platform.Fail(422, "VALIDATION_ERROR", "Danh mục quà không hợp lệ.")
 		}
-		if _, e = tx.Exec(ctx, `UPDATE gift_catalog SET name=$2,channel=nullif($3,''),cost=$4,stock=$5,active=$6,icon=$7,image_url=$8,description=$9 WHERE id=$1`, id, g.Name, g.Channel, g.CostXu, g.Stock, g.Active, g.Icon, g.ImageURL, g.Description); e != nil {
+		if _, e = tx.Exec(ctx, `UPDATE gift_catalog SET name=$2,channel=nullif($3,''),cost=$4,stock=$5,active=$6,icon=$7,image_url=$8,description=$9,image_position_y=$10 WHERE id=$1`, id, g.Name, g.Channel, g.CostXu, g.Stock, g.Active, g.Icon, g.ImageURL, g.Description, g.ImagePositionY); e != nil {
 			return nil, e
 		}
 		return g, platform.Audit(ctx, tx, actor, "gift_updated", id, p)

@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func TestV1OrdersRetainSevenDaysWhileV2ExpiresAfterSix(t *testing.T) {
+func TestHistoricalVersionsRetainMetadataWithoutBlockingAfterRetention(t *testing.T) {
 	s, user, admin := testStore(t)
 	ctx := context.Background()
 	created := time.Now().UTC().Add(-30 * 24 * time.Hour).Truncate(time.Second)
@@ -20,6 +20,12 @@ func TestV1OrdersRetainSevenDaysWhileV2ExpiresAfterSix(t *testing.T) {
 		t.Fatal(e)
 	}
 	newer := row
+	claims.Version = 2
+	newer.SubIDs, e = tracking.Issue(claims, row.SubIDs[0], row.Publisher, "0.63", s.SignTracking)
+	if e != nil {
+		t.Fatal(e)
+	}
+	newer.Tracking = newer.SubIDs[2]
 	newer.OrderID = "NEWV2"
 	newer.LineID, _ = imports.SourceLineID(newer)
 	newer.Date = created.Add(6 * 24 * time.Hour)
@@ -35,10 +41,10 @@ func TestV1OrdersRetainSevenDaysWhileV2ExpiresAfterSix(t *testing.T) {
 	var id string
 	var n int
 	var expiry time.Time
-	if e = s.Pool.QueryRow(ctx, `SELECT id::text,link_expires_at FROM orders`).Scan(&id, &expiry); e != nil || !expiry.Equal(created.Add(7*24*time.Hour)) {
+	if e = s.Pool.QueryRow(ctx, `SELECT id::text,link_expires_at FROM orders WHERE tracking_code=$1`, row.Tracking).Scan(&id, &expiry); e != nil || !expiry.Equal(created.Add(7*24*time.Hour)) {
 		t.Fatal(expiry, e)
 	}
-	if e = s.Pool.QueryRow(ctx, `SELECT count(*) FROM orders`).Scan(&n); e != nil || n != 1 {
+	if e = s.Pool.QueryRow(ctx, `SELECT count(*) FROM orders`).Scan(&n); e != nil || n != 2 {
 		t.Fatal(n, e)
 	}
 	row.Status = "approved"
@@ -55,7 +61,7 @@ func TestRejectedOnlyLinksRemainWithoutRemovingOrdersOrNotifyingProgress(t *test
 	id, row := savedFixture(t, s, user, created)
 	svc := &affiliate.Service{Store: s}
 	importRows(t, s, admin, []imports.Row{row})
-	if e := svc.CancelExpired(ctx, time.Now()); e != nil {
+	if _, e := svc.PurgeExpired(ctx, time.Now()); e != nil {
 		t.Fatal(e)
 	}
 	var n int
@@ -64,12 +70,9 @@ func TestRejectedOnlyLinksRemainWithoutRemovingOrdersOrNotifyingProgress(t *test
 	}
 	row.Status = "rejected"
 	importRows(t, s, admin, []imports.Row{row})
-	got := linkState(t, s, id)
-	if got["status"] != "cancelled" || got["canDelete"] != false {
-		t.Fatal(got)
-	}
-	if e := svc.DeleteLink(ctx, user, id); e == nil {
-		t.Fatal("rejected link was deleted")
+	var links int
+	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM affiliate_links WHERE id=$1`, id).Scan(&links); err != nil || links != 0 {
+		t.Fatal(links, err)
 	}
 	var status string
 	var cashback int64
@@ -96,7 +99,7 @@ func TestGenerationDoesNotReturnSuccessIfSavingLinkFails(t *testing.T) {
 	}
 }
 
-func TestMixedOrderStatusesKeepOneLinkLocked(t *testing.T) {
+func TestMixedOrderStatusesAllowHidingLinkWithoutRemovingOrders(t *testing.T) {
 	s, user, admin := testStore(t)
 	id, row := savedFixture(t, s, user, time.Now().UTC().Add(-24*time.Hour).Truncate(time.Second))
 	second := row
@@ -105,10 +108,14 @@ func TestMixedOrderStatusesKeepOneLinkLocked(t *testing.T) {
 	second.Status = "rejected"
 	importRows(t, s, admin, []imports.Row{row, second})
 	got := linkState(t, s, id)
-	if got["status"] != "progress" || got["canDelete"] != false {
+	if got["status"] != "active" || got["canDelete"] != true {
 		t.Fatal(got)
 	}
-	if e := (&affiliate.Service{Store: s}).DeleteLink(context.Background(), user, id); e == nil {
-		t.Fatal("mixed link deleted")
+	if e := (&affiliate.Service{Store: s}).DeleteLink(context.Background(), user, id); e != nil {
+		t.Fatal(e)
+	}
+	var count int
+	if e := s.Pool.QueryRow(context.Background(), `SELECT count(*) FROM orders WHERE tracking_code=$1`, row.Tracking).Scan(&count); e != nil || count != 2 {
+		t.Fatal(count, e)
 	}
 }

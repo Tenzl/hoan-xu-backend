@@ -75,6 +75,15 @@ func TestAdminOrderProfit(t *testing.T) {
 	legacy := insert("LEGACY", "legacy-server", "approved", 12000, 12000)
 	zero := insert("ZERO", "publisher", "approved", 0, 0)
 	tiny := insert("TINY", "publisher", "approved", 19, 10)
+	if _, err := store.Pool.Exec(ctx, `UPDATE orders SET source_report='{"reportChannel":"Zalo","shopeeOrderStatus":"Pending","affiliateItemStatus":"Pending","reportedValue":"100000.25","reportedCommission":"10019.44"}' WHERE id=$1`, pending); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/admin/orders/" + pending, "/admin/users/" + customer + "/orders/" + pending} {
+		row := get(path, adminToken, 200)["data"].(map[string]any)
+		if row["reportChannel"] != "Zalo" || row["shopeeOrderStatus"] != "Pending" || row["reportedCommission"] != "10019.44" {
+			t.Fatal("missing original report metadata", row)
+		}
+	}
 	for _, entry := range []struct {
 		id          string
 		fee, profit any
@@ -108,7 +117,7 @@ func TestAdminOrderProfit(t *testing.T) {
 		}
 		for _, raw := range rows {
 			row := raw.(map[string]any)
-			for _, key := range []string{"projectedProfit", "taxAmount", "profitStatus"} {
+			for _, key := range []string{"projectedProfit", "taxAmount", "profitStatus", "reportChannel", "reportedCommission"} {
 				if _, ok := row[key]; ok {
 					t.Fatal("customer response leaks profit", key)
 				}
@@ -154,8 +163,10 @@ func TestAdminOrderProfit(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(get("/admin/orders/"+pending, adminToken, 200)["data"].(map[string]any), float64(500), float64(4510), "projected")
- if _,err:=svc.Event(ctx,admin,pending,"profit-adjust",orders.Event{Action:"adjustment",Reason:"Report correction"});err==nil {t.Fatal("approved order adjusted")}
- check(get("/admin/orders/"+pending,adminToken,200)["data"].(map[string]any),float64(500),float64(4510),"projected")
+	if _, err := svc.Event(ctx, admin, pending, "profit-adjust", orders.Event{Action: "adjustment", Reason: "Report correction"}); err == nil {
+		t.Fatal("approved order adjusted")
+	}
+	check(get("/admin/orders/"+pending, adminToken, 200)["data"].(map[string]any), float64(500), float64(4510), "projected")
 	staff, err := auth.CreateInternal(ctx, store, admin, "profit-reader", "Reader", "test-staff-password", "staff", []string{"orders"})
 	if err != nil {
 		t.Fatal(err)

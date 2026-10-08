@@ -315,7 +315,7 @@ func New(s *Server) *chi.Mux {
 			s.list(w, r, `SELECT jsonb_build_object('name',left(u.name,1)||'***','cashback',sum(o.cashback),'orders',count(*)) FROM orders o JOIN users u ON u.id=o.user_id WHERE o.status='approved' AND date_trunc('month',o.ordered_at AT TIME ZONE 'Asia/Ho_Chi_Minh')=date_trunc('month',now() AT TIME ZONE 'Asia/Ho_Chi_Minh') GROUP BY u.id ORDER BY sum(o.cashback) DESC LIMIT 5`)
 		})
 		r.Get("/gifts", func(w http.ResponseWriter, r *http.Request) {
-			s.list(w, r, `SELECT jsonb_build_object('id',id,'name',name,'channel',channel,'costXu',cost,'costUnit','xu','currency','green','stock',stock,'active',active,'icon',icon,'imageUrl',image_url,'description',description) FROM gift_catalog WHERE active ORDER BY cost,id`)
+			s.list(w, r, `SELECT jsonb_build_object('id',id,'name',name,'channel',channel,'costXu',cost,'costUnit','xu','currency','green','stock',stock,'active',active,'icon',icon,'imageUrl',image_url,'imagePositionY',image_position_y,'description',description) FROM gift_catalog WHERE active ORDER BY cost,id`)
 		})
 		r.Post("/product-checks", s.check)
 		r.Post("/shopee/check", s.check)
@@ -429,6 +429,10 @@ func (s *Server) customerRoutes(r chi.Router) {
 		r.Get("/orders", func(w http.ResponseWriter, r *http.Request) {
 			l, o := page(r)
 			status := r.URL.Query().Get("status")
+			if status != "" && status != "pending" && status != "approved" && status != "rejected" {
+				s.reply(w, r, 0, nil, platform.Fail(422, "INVALID_STATUS", "Trạng thái không hợp lệ."))
+				return
+			}
 			s.list(w, r, orderSQL+` WHERE o.user_id=$1 AND ($4='' OR o.status=$4) ORDER BY o.ordered_at DESC,o.id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o, status)
 		})
 		r.Get("/orders/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -436,7 +440,7 @@ func (s *Server) customerRoutes(r chi.Router) {
 		})
 		r.Get("/affiliate-links", func(w http.ResponseWriter, r *http.Request) {
 			l, o := page(r)
-			s.list(w, r, affiliate.LinksSQL+` WHERE l.user_id=$1 ORDER BY l.created_at DESC,l.id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o)
+			s.list(w, r, affiliate.LinksSQL+` WHERE l.user_id=$1 AND `+affiliate.VisibleLinksSQL+` ORDER BY l.created_at DESC,l.id DESC LIMIT $2 OFFSET $3`, user(r).ID, l, o)
 		})
 		r.Delete("/affiliate-links/{id}", func(w http.ResponseWriter, r *http.Request) {
 			if err := s.Affiliate.DeleteLink(r.Context(), user(r).ID, chi.URLParam(r, "id")); err != nil {
@@ -451,7 +455,7 @@ func (s *Server) customerRoutes(r chi.Router) {
 				s.reply(w, r, 0, nil, platform.Fail(404, "NOT_FOUND", "Không có link."))
 				return
 			}
-			s.one(w, r, affiliate.LinksSQL+` WHERE l.id=$1 AND l.user_id=$2`, id, user(r).ID)
+			s.one(w, r, affiliate.LinksSQL+` WHERE l.id=$1 AND l.user_id=$2 AND `+affiliate.VisibleLinksSQL, id, user(r).ID)
 		})
 		r.Post("/affiliate-links", func(w http.ResponseWriter, r *http.Request) {
 			var p struct {
@@ -465,7 +469,23 @@ func (s *Server) customerRoutes(r chi.Router) {
 			if e == nil {
 				v, e = s.Affiliate.CreateLinkOperation(r.Context(), user(r).ID, r.Header.Get("Idempotency-Key"), p.URL)
 			}
-			s.reply(w, r, 200, v, e)
+			status := http.StatusOK
+			if e == nil {
+				var link struct {
+					ID     string `json:"id"`
+					Reused bool   `json:"reused"`
+				}
+				payload, marshalErr := json.Marshal(v)
+				if marshalErr != nil {
+					e = marshalErr
+				} else if decodeErr := json.Unmarshal(payload, &link); decodeErr != nil {
+					e = decodeErr
+				} else if !link.Reused {
+					status = http.StatusCreated
+					w.Header().Set("Location", "/api/v1/affiliate-links/"+link.ID)
+				}
+			}
+			s.reply(w, r, status, v, e)
 		})
 		r.Get("/withdrawals", s.withdrawalList(false))
 		r.Post("/withdrawals", func(w http.ResponseWriter, r *http.Request) {

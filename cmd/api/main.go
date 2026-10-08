@@ -183,14 +183,16 @@ func maintenance(ctx context.Context, s *platform.Store, private string) {
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
 	// Also catch links that expired while the backend was stopped.
-	cancelExpired := func() {
+	purgeLinks := func() {
 		c, done := context.WithTimeout(ctx, 30*time.Second)
 		defer done()
-		if err := (&affiliate.Service{Store: s}).CancelExpired(c, time.Now().UTC()); err != nil {
-			slog.Error("link_cancellation_failed", "error", err)
+		if count, err := (&affiliate.Service{Store: s}).PurgeExpired(c, time.Now().UTC()); err != nil {
+			slog.Error("link_cleanup_failed", "error", err)
+		} else if count > 0 {
+			slog.Info("saved_links_deleted", "count", count)
 		}
 	}
-	cancelExpired()
+	purgeLinks()
 	lastFull := time.Time{}
 	reconcile := func() {
 		check, done := context.WithTimeout(ctx, 30*time.Second)
@@ -217,7 +219,7 @@ func maintenance(ctx context.Context, s *platform.Store, private string) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			cancelExpired()
+			purgeLinks()
 			cleanup, done := context.WithTimeout(ctx, 30*time.Second)
 			if e := privatefiles.Cleanup(cleanup, s, private); e != nil {
 				slog.Error("private_file_cleanup_failed", "error", e)

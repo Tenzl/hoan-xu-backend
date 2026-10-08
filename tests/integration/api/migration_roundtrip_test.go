@@ -28,7 +28,7 @@ func TestAuditMigrationsRoundTripPreservesFinancialHistory(t *testing.T) {
 	if err = store.Pool.QueryRow(ctx, digest).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	names := []string{"000016_import_review", "000017_link_operations", "000018_file_lifecycle", "000019_ledger_reconciliation", "000020_link_product_name", "000021_internal_access"}
+	names := []string{"000016_import_review", "000017_link_operations", "000018_file_lifecycle", "000019_ledger_reconciliation", "000020_link_product_name", "000021_internal_access", "000032_shopee_report", "000033_link_reuse", "000034_gift_image_position", "000035_link_retention"}
 	run := func(name, direction string) {
 		t.Helper()
 		sql, err := os.ReadFile(filepath.Join("../../database/migrations", name+"."+direction+".sql"))

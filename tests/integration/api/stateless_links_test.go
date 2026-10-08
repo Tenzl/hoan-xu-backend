@@ -110,10 +110,10 @@ func TestSignedCSVExpiryLateImportSnapshotDuplicateAndCancellation(t *testing.T)
 	var cash int64
 	var bps int
 	var link *string
-	if e = s.Pool.QueryRow(ctx, `SELECT count(*) FROM orders`).Scan(&n); e != nil || n != 3 {
+	if e = s.Pool.QueryRow(ctx, `SELECT count(*) FROM orders`).Scan(&n); e != nil || n != 5 {
 		t.Fatal(n, e)
 	}
-	if e = s.Pool.QueryRow(ctx, `SELECT count(*) FROM import_rows WHERE batch_id=$1 AND status='ignored' AND error IS NOT NULL`, batch).Scan(&ignored); e != nil || ignored != 8 {
+	if e = s.Pool.QueryRow(ctx, `SELECT count(*) FROM import_rows WHERE batch_id=$1 AND status='ignored' AND error IS NOT NULL`, batch).Scan(&ignored); e != nil || ignored != 6 {
 		t.Fatal(ignored, e)
 	}
 	if e = s.Pool.QueryRow(ctx, `SELECT id::text,status,source_status,cashback,share_bps,link_id::text FROM orders WHERE line_id='line-one'`).Scan(&id, &status, &source, &cash, &bps, &link); e != nil || status != "pending" || source != "pending" || cash != 3151 || bps != 6300 || link != nil {
@@ -169,8 +169,8 @@ func TestSignedCSVExpiryLateImportSnapshotDuplicateAndCancellation(t *testing.T)
 	if e = s.Pool.QueryRow(ctx, `SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'`, customer).Scan(&balance); e != nil || balance != 6301 {
 		t.Fatal(balance, e)
 	}
-	// A stored pending order whose order time was changed outside the window cannot be approved.
-	if _, e = s.Pool.Exec(ctx, `UPDATE orders SET ordered_at=link_expires_at WHERE line_id='last-second'`); e != nil {
+	// Retention expiry does not block approval; a date before issuance still does.
+	if _, e = s.Pool.Exec(ctx, `UPDATE orders SET ordered_at=link_created_at-interval '1 second' WHERE line_id='last-second'`); e != nil {
 		t.Fatal(e)
 	}
 	var lastID string

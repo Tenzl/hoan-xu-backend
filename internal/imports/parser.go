@@ -11,6 +11,7 @@ import (
 )
 
 type Row struct {
+	ReportMetadata
 	NativeShopee bool      `json:"nativeShopee,omitempty"`
 	SubIDs       [5]string `json:"subIds,omitempty"`
 	ShopID       string    `json:"shopId,omitempty"`
@@ -29,6 +30,20 @@ type Row struct {
 	Commission   int64     `json:"commission"`
 	Status       string    `json:"status"`
 	Error        string    `json:"error,omitempty"`
+}
+
+// ReportMetadata retains Shopee's source values independently of internal state.
+type ReportMetadata struct {
+	ReportChannel       string `json:"reportChannel,omitempty"`
+	ShopeeOrderStatus   string `json:"shopeeOrderStatus,omitempty"`
+	AffiliateItemStatus string `json:"affiliateItemStatus,omitempty"`
+	ReportedValue       string `json:"reportedValue,omitempty"`
+	ReportedCommission  string `json:"reportedCommission,omitempty"`
+}
+
+func (row Row) AutoApproveEligible() bool {
+	status, err := shopeeStatus(row.ShopeeOrderStatus, row.AffiliateItemStatus)
+	return row.NativeShopee && row.Error == "" && row.Status == "approved" && err == nil && status == "approved"
 }
 
 var fields = []string{"channel", "publisher", "order_id", "line_id", "tracking_code", "date", "product_name", "value", "commission", "status"}

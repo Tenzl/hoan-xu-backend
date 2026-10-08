@@ -2902,7 +2902,8 @@
             }
           }
         },
-        "summary": "GET /affiliate-links"
+        "summary": "GET /affiliate-links",
+        "description": "All customer-owned saved links, including links that have reported orders. Signed links older than five days are excluded even before maintenance deletes them. Legacy links are retained read-only."
       },
       "post": {
         "operationId": "post__affiliate_links",
@@ -2953,7 +2954,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Created and saved short link with signed 7-day tracking; no order is created.",
+            "description": "Existing saved link reused (or a compatible historical idempotent replay)",
             "content": {
               "application/json": {
                 "schema": {
@@ -2971,6 +2972,37 @@
                     "data",
                     "meta"
                   ]
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "New link created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AffiliateLinkCreated"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "URI of the new saved link",
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -3077,7 +3109,7 @@
           }
         },
         "summary": "POST /affiliate-links",
-        "description": "Resolve the incoming product link, discard incoming attribution, then generate a new short link with system publisher and authenticated customer tracking. New records store the canonical product URL as original_url. Shop links return 422 NOT_PRODUCT_LINK."
+        "description": "Generate a signed link, or reuse the existing saved link for the same customer and canonical product during five-day retention. Physical deletion permits creating a replacement. Link retention never limits CSV attribution."
       }
     },
     "/orders": {
@@ -3125,8 +3157,11 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "minLength": 0,
-              "maxLength": 500
+              "enum": [
+                "pending",
+                "approved",
+                "rejected"
+              ]
             }
           },
           {
@@ -3241,7 +3276,8 @@
             }
           }
         },
-        "summary": "GET /orders"
+        "summary": "GET /orders",
+        "description": "Customer orders only, independent of saved links. Filter by pending, approved or rejected; unknown status returns 422."
       }
     },
     "/orders/{id}": {
@@ -11704,6 +11740,9 @@
           }
         ],
         "responses": {
+          "204": {
+            "description": "Saved link physically deleted; orders and wallet history preserved"
+          },
           "400": {
             "description": "Invalid JSON",
             "content": {
@@ -11725,7 +11764,7 @@
             }
           },
           "403": {
-            "description": "Link deletion disabled, permission or CSRF failure",
+            "description": "Invalid CSRF token or read-only legacy link",
             "content": {
               "application/json": {
                 "schema": {
@@ -11776,7 +11815,7 @@
           }
         },
         "summary": "DELETE /affiliate-links/{id}",
-        "description": "Customer link deletion is disabled. Owned links return 403 LINK_DELETION_DISABLED; missing or foreign links return 404. Expired links remain saved with cancellation status.",
+        "description": "Physically delete the customer-owned signed saved link. Preserve order attribution and financial history. Unknown, previously deleted, or foreign link returns 404. Legacy links remain read-only.",
         "deprecated": true
       },
       "get": {
@@ -12670,7 +12709,9 @@
             }
           }
         },
-        "summary": "Customer purchases and links awaiting reports"
+        "summary": "Customer purchases and links awaiting reports",
+        "deprecated": true,
+        "description": "Deprecated mixed feed retained for compatibility. Use /affiliate-links for saved links and /orders?status=pending|approved|rejected for orders."
       }
     },
     "/admin/users/{userId}/orders": {
@@ -17007,6 +17048,12 @@
             "type": "string",
             "maxLength": 2000,
             "description": "Optional plain text description. Empty string clears it."
+          },
+          "imagePositionY": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Vertical crop position in percent: 0 is top, 50 is center, 100 is bottom. Defaults to 50 for new gifts; omitted on PATCH preserves the current position."
           }
         },
         "required": [],
@@ -17541,14 +17588,12 @@
               "completed",
               "cancelled",
               "legacy"
-            ]
+            ],
+            "description": "Saved-list state only; signed visible links return active independently of order state. Historical links return legacy."
           },
           "canDelete": {
             "type": "boolean",
-            "enum": [
-              false
-            ],
-            "description": "Always false: customers cannot delete saved links."
+            "description": "True for an owned signed saved link. Physical deletion preserves orders and wallet history; legacy links remain read-only."
           },
           "legacy": {
             "type": "boolean"
@@ -17556,7 +17601,8 @@
           "expiresAt": {
             "format": "date-time",
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "Original token metadata, retained for compatibility. Not a cashback eligibility deadline. Use autoDeleteAt for saved-list retention."
           },
           "effectiveSharePercent": {
             "minimum": 0,
@@ -17581,6 +17627,12 @@
           "tierNameEn": {
             "type": "string",
             "nullable": true
+          },
+          "autoDeleteAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "Saved signed links are automatically physically deleted at createdAt + 120 hours. This does not limit CSV attribution."
           }
         },
         "required": [
@@ -17599,7 +17651,8 @@
           "legacy",
           "expiresAt",
           "effectiveSharePercent",
-          "payoutFactor"
+          "payoutFactor",
+          "autoDeleteAt"
         ]
       },
       "Deal": {
@@ -17748,6 +17801,12 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          },
+          "imagePositionY": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Vertical crop position in percent: 0 is top, 50 is center, 100 is bottom. Defaults to 50 for new gifts; omitted on PATCH preserves the current position."
           }
         },
         "required": [
@@ -18901,7 +18960,8 @@
           },
           "expiresAt": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "Original token metadata, retained for compatibility. Not a cashback eligibility deadline. Use autoDeleteAt for saved-list retention."
           },
           "payoutFactor": {
             "type": "string",
@@ -18925,14 +18985,12 @@
               "progress",
               "completed",
               "cancelled"
-            ]
+            ],
+            "description": "Saved-list state only; signed visible links return active independently of order state. Historical links return legacy."
           },
           "canDelete": {
             "type": "boolean",
-            "enum": [
-              false
-            ],
-            "description": "Always false: customers cannot delete saved links."
+            "description": "True for an owned signed saved link. Physical deletion preserves orders and wallet history; legacy links remain read-only."
           },
           "legacy": {
             "type": "boolean"
@@ -18949,6 +19007,16 @@
           "tierNameEn": {
             "type": "string",
             "nullable": true
+          },
+          "reused": {
+            "type": "boolean",
+            "description": "True when an existing visible, unexpired link for this customer and product was returned without generating or sampling a new link."
+          },
+          "autoDeleteAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": false,
+            "description": "Saved signed links are automatically physically deleted at createdAt + 120 hours. This does not limit CSV attribution."
           }
         },
         "required": [
@@ -18966,9 +19034,10 @@
           "id",
           "status",
           "canDelete",
-          "legacy"
+          "legacy",
+          "autoDeleteAt"
         ],
-        "description": "Saved Shopee short link. New v2 tokens grant 144 hours; v1 tokens retain 168 hours. Physical deletion removes only the link record: timely orders remain attributable through signed SubIDs."
+        "description": "New or reused signed Shopee link. Saved for five days; CSV attribution remains valid after saved-link deletion or retention expiry. New link: 201; reused link: 200."
       },
       "ManualOrderCreated": {
         "type": "object",
@@ -19887,6 +19956,12 @@
             "type": "string",
             "maxLength": 2000,
             "description": "Optional plain text description. Empty string clears it."
+          },
+          "imagePositionY": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Vertical crop position in percent: 0 is top, 50 is center, 100 is bottom. Defaults to 50 for new gifts; omitted on PATCH preserves the current position."
           }
         },
         "required": [
@@ -20120,6 +20195,26 @@
               "tiktok",
               "tiki"
             ]
+          },
+          "reportChannel": {
+            "type": "string",
+            "description": "Channel reported by Shopee, such as Zalo or Code Sharing; empty for older orders."
+          },
+          "shopeeOrderStatus": {
+            "type": "string",
+            "description": "Original Shopee Order Status; independent of internal approval."
+          },
+          "affiliateItemStatus": {
+            "type": "string",
+            "description": "Original Shopee Affiliate Item Status."
+          },
+          "reportedValue": {
+            "type": "string",
+            "description": "Original decimal VND purchase value. Internal value is floored to whole VND."
+          },
+          "reportedCommission": {
+            "type": "string",
+            "description": "Original decimal Item Total Commission in VND. Internal commission is floored before cashback calculation."
           },
           "productName": {
             "type": "string",

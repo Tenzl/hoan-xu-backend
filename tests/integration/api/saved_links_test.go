@@ -70,58 +70,34 @@ func removeHistoricalLinkFixture(t *testing.T, s *platform.Store, user, id strin
 	}
 }
 
-func TestSavedLinksCancelOnceLateReportRevivesAndLocksDeletion(t *testing.T) {
+func TestExpiredLinksAreDeletedWithoutBlockingLateCSVApproval(t *testing.T) {
 	s, user, admin := testStore(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 	id, row := savedFixture(t, s, user, now.Add(-7*24*time.Hour))
 	svc := &affiliate.Service{Store: s}
-	before := linkState(t, s, id)
-	if before["status"] != "cancelled" || before["canDelete"] != false {
-		t.Fatal(before)
-	}
 	for i := 0; i < 2; i++ {
-		if e := svc.CancelExpired(ctx, now); e != nil {
-			t.Fatal(e)
+		if _, err := svc.PurgeExpired(ctx, now); err != nil {
+			t.Fatal(err)
 		}
 	}
-	var n int
-	if e := s.Pool.QueryRow(ctx, `SELECT count(*) FROM notifications WHERE recipient_id=$1`, user).Scan(&n); e != nil || n != 1 {
-		t.Fatal(n, e)
+	var links, notifications int
+	if err := s.Pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM affiliate_links WHERE id=$1),(SELECT count(*) FROM notifications WHERE recipient_id=$2)`, id, user).Scan(&links, &notifications); err != nil || links != 0 || notifications != 0 {
+		t.Fatal(links, notifications, err)
 	}
-	importRows(t, s, admin, []imports.Row{row})
-	got := linkState(t, s, id)
-	if got["status"] != "progress" || got["canDelete"] != false {
-		t.Fatal(got)
-	}
-	if e := svc.DeleteLink(ctx, user, id); e == nil {
-		t.Fatal("deleted progress link")
-	}
+	row.Date = row.Date.Add(10 * 24 * time.Hour)
 	row.Status = "approved"
 	importRows(t, s, admin, []imports.Row{row})
 	var order string
-	if e := s.Pool.QueryRow(ctx, `SELECT id::text FROM orders WHERE tracking_code=$1`, row.Tracking).Scan(&order); e != nil {
-		t.Fatal(e)
+	if err := s.Pool.QueryRow(ctx, `SELECT id::text FROM orders WHERE tracking_code=$1`, row.Tracking).Scan(&order); err != nil {
+		t.Fatal(err)
 	}
-	if _, e := (&orders.Service{Store: s}).Event(ctx, admin, order, "approve-saved", orders.Event{Action: "approved"}); e != nil {
-		t.Fatal(e)
-	}
-	got = linkState(t, s, id)
-	if got["status"] != "completed" || got["canDelete"] != false {
-		t.Fatal(got)
-	}
-	if e := svc.DeleteLink(ctx, user, id); e == nil {
-		t.Fatal("deleted completed link")
-	}
-	if e := svc.CancelExpired(ctx, now.Add(time.Hour)); e != nil {
-		t.Fatal(e)
-	}
-	if e := s.Pool.QueryRow(ctx, `SELECT count(*) FROM notifications WHERE recipient_id=$1`, user).Scan(&n); e != nil || n != 1 {
-		t.Fatal(n, e)
+	if _, err := (&orders.Service{Store: s}).Event(ctx, admin, order, "approve-expired", orders.Event{Action: "approved"}); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestDeletedLinkStillAcceptsTimelyLateOrderAndRejectsOutOfWindow(t *testing.T) {
+func TestDeletedLinkAcceptsReportsAfterRetentionAndRejectsBeforeIssue(t *testing.T) {
 	s, user, admin := testStore(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -130,7 +106,7 @@ func TestDeletedLinkStillAcceptsTimelyLateOrderAndRejectsOutOfWindow(t *testing.
 	bad := row
 	bad.OrderID = "ORDER2"
 	bad.LineID, _ = imports.SourceLineID(bad)
-	bad.Date = row.Date.Add(6 * 24 * time.Hour)
+	bad.Date = row.Date.Add(-2 * time.Hour)
 	importRows(t, s, admin, []imports.Row{row, row, bad})
 	var links, count int
 	var cash int64
@@ -185,10 +161,10 @@ func TestDeleteLinkHTTPChecksOwnershipCSRFAndLegacy(t *testing.T) {
 	if got := request(otherID, u.CSRF); got != 404 {
 		t.Fatal("ownership", got)
 	}
-	if got := request(id, u.CSRF); got != 403 {
-		t.Fatal("customer deletion must be disabled", got)
+	if got := request(id, u.CSRF); got != 204 {
+		t.Fatal("customer deletion", got)
 	}
-	if got := request(id, u.CSRF); got != 403 {
+	if got := request(id, u.CSRF); got != 404 {
 		t.Fatal("repeat", got)
 	}
 	legacy, _ := savedFixture(t, s, user, time.Now().UTC().Truncate(time.Second))
@@ -199,12 +175,12 @@ func TestDeleteLinkHTTPChecksOwnershipCSRFAndLegacy(t *testing.T) {
 		t.Fatal("legacy", got)
 	}
 	var count int
-	if e := s.Pool.QueryRow(ctx, `SELECT count(*) FROM affiliate_links WHERE user_id=$1`, user).Scan(&count); e != nil || count != 2 {
-		t.Fatal("denied deletion must preserve links", count, e)
+	if e := s.Pool.QueryRow(ctx, `SELECT count(*) FROM affiliate_links WHERE user_id=$1`, user).Scan(&count); e != nil || count != 1 {
+		t.Fatal("logical deletion must preserve links", count, e)
 	}
 }
 
-func TestDeletionIsDeniedDuringConcurrentImport(t *testing.T) {
+func TestDeletionWaitsForConcurrentImportAndPreservesOrder(t *testing.T) {
 	s, user, _ := testStore(t)
 	ctx := context.Background()
 	id, row := savedFixture(t, s, user, time.Now().UTC().Truncate(time.Second))
@@ -220,11 +196,8 @@ func TestDeletionIsDeniedDuringConcurrentImport(t *testing.T) {
 	go func() { result <- (&affiliate.Service{Store: s}).DeleteLink(ctx, user, id) }()
 	select {
 	case err := <-result:
-		if err == nil {
-			t.Fatal("deletion was allowed")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("disabled deletion should not wait for the import")
+		t.Fatal("deletion did not wait for the tracking lock", err)
+	case <-time.After(100 * time.Millisecond):
 	}
 	if _, _, e = imports.InsertSignedOrder(ctx, tx, s, &row); e != nil {
 		t.Fatal(e)
@@ -232,7 +205,16 @@ func TestDeletionIsDeniedDuringConcurrentImport(t *testing.T) {
 	if e = tx.Commit(ctx); e != nil {
 		t.Fatal(e)
 	}
-	if got := linkState(t, s, id); got["status"] != "progress" || got["canDelete"] != false {
-		t.Fatal("import should retain the link", got)
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("deletion did not complete after import")
+	}
+	var links, count int
+	if err := s.Pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM affiliate_links WHERE id=$1),(SELECT count(*) FROM orders WHERE tracking_code=$2)`, id, row.Tracking).Scan(&links, &count); err != nil || links != 0 || count != 1 {
+		t.Fatal(links, count, err)
 	}
 }

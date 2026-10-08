@@ -51,6 +51,9 @@ func (s *Service) CheckEnabled() bool {
 }
 func (s *Service) ClearCache() { s.mu.Lock(); defer s.mu.Unlock(); s.cache = nil }
 func (s *Service) Check(ctx context.Context, raw string) (value any, checkErr error) {
+	return s.check(ctx, raw, "")
+}
+func (s *Service) check(ctx context.Context, raw, publisherSnapshot string) (value any, checkErr error) {
 	started := time.Now()
 	var resolveTime, checkWait time.Duration
 	var cacheHit, shared bool
@@ -68,8 +71,11 @@ func (s *Service) Check(ctx context.Context, raw string) (value any, checkErr er
 	if !s.CheckEnabled() || s.Browser == nil {
 		return nil, platform.Fail(503, "SHOPEE_NOT_CONFIGURED", "Shopee đang ở trạng thái chưa sẵn sàng; mẫu được giữ tại /demo.")
 	}
-	publisher := s.Publisher
-	if s.Store != nil && s.Store.Pool != nil {
+	publisher := publisherSnapshot
+	if publisher == "" {
+		publisher = s.Publisher
+	}
+	if publisherSnapshot == "" && s.Store != nil && s.Store.Pool != nil {
 		publisher, e = s.PublisherID(ctx)
 		if e != nil {
 			return nil, e
@@ -166,14 +172,66 @@ func (s *Service) createLink(ctx context.Context, user, raw string, complete fun
 	if e != nil {
 		return nil, resolveError(e)
 	}
-	if !s.CheckEnabled() || !s.TrackingVerified {
-		return nil, platform.Fail(503, "TRACKING_NOT_VERIFIED", "Chưa xác minh tracking Shopee; chưa tạo link hoàn tiền thật.")
+	conn, unlock, e := s.lockProduct(ctx, user, canonical)
+	if e != nil {
+		return nil, e
 	}
-	tx, e := s.Store.Pool.Begin(ctx)
+	defer unlock()
+	tx, e := conn.Begin(ctx)
 	if e != nil {
 		return nil, e
 	}
 	defer tx.Rollback(ctx)
+	var customerTracking string
+	if e = tx.QueryRow(ctx, `SELECT tracking_code FROM users WHERE id=$1 AND role='customer' AND NOT blocked`, user).Scan(&customerTracking); e != nil {
+		return nil, e
+	}
+	var existing []byte
+	stale, e := tx.Query(ctx, `SELECT id::text,tracking_code FROM affiliate_links WHERE user_id=$1 AND channel='shopee' AND original_url=$2 AND tracking_sub_ids IS NOT NULL AND (deleted_at IS NOT NULL OR created_at<=now()-interval '120 hours') ORDER BY created_at,id`, user, canonical)
+	if e != nil {
+		return nil, e
+	}
+	type oldLink struct{ id, code string }
+	var expiredLinks []oldLink
+	for stale.Next() {
+		var l oldLink
+		if e = stale.Scan(&l.id, &l.code); e != nil {
+			stale.Close()
+			return nil, e
+		}
+		expiredLinks = append(expiredLinks, l)
+	}
+	e = stale.Err()
+	stale.Close()
+	if e != nil {
+		return nil, e
+	}
+	for _, l := range expiredLinks {
+		if e = deleteSavedLink(ctx, tx, user, l.id, l.code); e != nil {
+			return nil, e
+		}
+	}
+	e = tx.QueryRow(ctx, LinksSQL+` WHERE l.user_id=$1 AND l.channel='shopee' AND l.original_url=$2 AND l.tracking_sub_ids IS NOT NULL AND `+VisibleLinksSQL+` ORDER BY l.created_at DESC,l.id DESC LIMIT 1`, user, canonical).Scan(&existing)
+	if e == nil {
+		var result map[string]any
+		if e = json.Unmarshal(existing, &result); e != nil {
+			return nil, e
+		}
+		result["reused"] = true
+		delete(result, "originalUrl")
+		if complete != nil {
+			if e = complete(tx, result["id"].(string), result); e != nil {
+				return nil, e
+			}
+		}
+		return result, tx.Commit(ctx)
+	}
+	if e != pgx.ErrNoRows {
+		return nil, e
+	}
+	if !s.CheckEnabled() || !s.TrackingVerified {
+		return nil, platform.Fail(503, "TRACKING_NOT_VERIFIED", "Chưa xác minh tracking Shopee; chưa tạo link hoàn tiền thật.")
+	}
 	var settings []byte
 	var status string
 	e = tx.QueryRow(ctx, `SELECT status,settings FROM affiliate_channels WHERE id='shopee'`).Scan(&status, &settings)
@@ -192,10 +250,6 @@ func (s *Service) createLink(ctx context.Context, user, raw string, complete fun
 	if conf.Publisher == "" {
 		return nil, platform.Fail(503, "PUBLISHER_NOT_CONFIGURED", "Nhập Affiliate ID tại trang Đăng nhập Shopee trước khi tạo link.")
 	}
-	var customerTracking string
-	if e = tx.QueryRow(ctx, `SELECT tracking_code FROM users WHERE id=$1 AND role='customer' AND NOT blocked`, user).Scan(&customerTracking); e != nil {
-		return nil, e
-	}
 	if _, e = tx.Exec(ctx, `SELECT id FROM app_settings FOR SHARE`); e != nil {
 		return nil, e
 	}
@@ -213,7 +267,9 @@ func (s *Service) createLink(ctx context.Context, user, raw string, complete fun
 	}
 	lookup := s.ProductLookup
 	if lookup == nil {
-		lookup = s.Check
+		// The generation session already owns a pooled connection. Use the
+		// snapshotted publisher so checking does not need another connection.
+		lookup = func(ctx context.Context, raw string) (any, error) { return s.check(ctx, raw, conf.Publisher) }
 	}
 	checked, e := lookup(ctx, canonical)
 	if e != nil {
@@ -270,7 +326,7 @@ func (s *Service) createLink(ctx context.Context, user, raw string, complete fun
 		return nil, e
 	}
 	var id string
-	save, e := s.Store.Pool.Begin(ctx)
+	save, e := conn.Begin(ctx)
 	if e != nil {
 		return nil, e
 	}
@@ -279,8 +335,9 @@ func (s *Service) createLink(ctx context.Context, user, raw string, complete fun
 	if e != nil {
 		return nil, e
 	}
-	result := map[string]any{"id": id, "status": "active", "canDelete": false, "legacy": false, "affiliateUrl": shortURL, "trackingCode": ids[2], "channel": "shopee", "policyId": m.PolicyID, "tierCode": m.Code, "tierNameVi": m.NameVI, "tierNameEn": m.NameEN, "minSharePercent": m.Public().Min, "maxSharePercent": m.Public().Max, "effectiveSharePercent": cashback.Percent(rate.EffectiveBps), "payoutFactor": rate.Factor(), "createdAt": created, "expiresAt": claims.ExpiresAt()}
+	result := map[string]any{"id": id, "status": "active", "canDelete": true, "reused": false, "legacy": false, "affiliateUrl": shortURL, "trackingCode": ids[2], "channel": "shopee", "policyId": m.PolicyID, "tierCode": m.Code, "tierNameVi": m.NameVI, "tierNameEn": m.NameEN, "minSharePercent": m.Public().Min, "maxSharePercent": m.Public().Max, "effectiveSharePercent": cashback.Percent(rate.EffectiveBps), "payoutFactor": rate.Factor(), "createdAt": created, "expiresAt": claims.ExpiresAt()}
 	result["productName"] = product.Name
+	result["autoDeleteAt"] = created.Add(Retention)
 	if complete != nil {
 		if e = complete(save, id, result); e != nil {
 			return nil, e

@@ -57,7 +57,7 @@ func TestLinkOperationSurvivesDisconnectReplaysAndRejectsConflict(t *testing.T) 
 		t.Fatal(err)
 	}
 	// Cached responses from the former deletion policy must use the current permission.
-	if _, err = s.Pool.Exec(ctx, `UPDATE link_operations SET response=response||'{"canDelete":true}'::jsonb WHERE user_id=$1 AND key='operation-test'`, user); err != nil {
+	if _, err = s.Pool.Exec(ctx, `UPDATE link_operations SET response=response||'{"canDelete":false}'::jsonb WHERE user_id=$1 AND key='operation-test'`, user); err != nil {
 		t.Fatal(err)
 	}
 	v, err := aff.CreateLinkOperation(ctx, user, "operation-test", "https://shopee.vn/product/1/2")
@@ -68,7 +68,7 @@ func TestLinkOperationSurvivesDisconnectReplaysAndRejectsConflict(t *testing.T) 
 	if err = json.Unmarshal(v.(json.RawMessage), &link); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.calls.Load() != 1 || link["payoutFactor"] == nil || link["canDelete"] != false {
+	if fixture.calls.Load() != 1 || link["payoutFactor"] == nil || link["canDelete"] != true {
 		t.Fatal("re-sampled operation", fixture.calls.Load(), link)
 	}
 	if _, err = aff.CreateLinkOperation(ctx, user, "operation-test", "https://shopee.vn/product/1/3"); err == nil {
@@ -77,6 +77,13 @@ func TestLinkOperationSurvivesDisconnectReplaysAndRejectsConflict(t *testing.T) 
 	var count int
 	if err = s.Pool.QueryRow(ctx, `SELECT count(*) FROM affiliate_links`).Scan(&count); err != nil || count != 1 {
 		t.Fatal(count, err)
+	}
+	if err = aff.DeleteLink(ctx, user, link["id"].(string)); err != nil {
+		t.Fatal(err)
+	}
+	_, err = aff.CreateLinkOperation(ctx, user, "operation-test", "https://shopee.vn/product/1/2")
+	if !errors.As(err, &p) || p.Status != 410 || p.Code != "LINK_DELETED" {
+		t.Fatal("deleted operation replayed a hidden link", err)
 	}
 }
 func TestFailedLinkOperationDoesNotSaveSnapshotOrRetryGenerator(t *testing.T) {

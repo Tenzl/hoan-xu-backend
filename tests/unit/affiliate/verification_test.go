@@ -26,7 +26,7 @@ func (b *diagnosticBrowser) Check(context.Context, string) ([]byte, error) { ret
 func (b *diagnosticBrowser) CreateOfferLink(_ context.Context, shop, item string, ids [5]string) (string, error) {
 	b.called = true
 	claims, err := tracking.Verify(ids, "123456789", b.store.SignTracking)
-	if err != nil || shop != "1" || item != "2" || ids[0] != "hxverify" || ids[1] != "hoanxu" || ids[3] != "0p63" || len(ids[2]) != 49 || len(ids[4]) != 32 || claims.Version != 2 {
+	if err != nil || shop != "1" || item != "2" || ids[0] != "hxverify" || ids[1] != "hoanxu" || ids[3] != "0p63" || len(ids[2]) != 49 || len(ids[4]) != 32 || claims.Version != tracking.CurrentVersion {
 		b.t.Fatal("diagnostic token does not match real format", ids, claims, err)
 	}
 	if b.reject {

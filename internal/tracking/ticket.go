@@ -13,8 +13,8 @@ import (
 )
 
 const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-const Lifetime = 6 * 24 * time.Hour
-const CurrentVersion uint8 = 2
+const Lifetime = 5 * 24 * time.Hour
+const CurrentVersion uint8 = 3
 
 type Signer func(string, [4]string) string
 type Claims struct {
@@ -30,10 +30,14 @@ func (c Claims) ExpiresAt() time.Time {
 	if c.Version == 1 {
 		return c.CreatedAt.Add(7 * 24 * time.Hour)
 	}
+	if c.Version == 2 {
+		return c.CreatedAt.Add(6 * 24 * time.Hour)
+	}
 	return c.CreatedAt.Add(Lifetime)
 }
 func (c Claims) Eligible(at time.Time) bool {
-	return !at.Before(c.CreatedAt) && at.Before(c.ExpiresAt())
+	// Saved-link retention does not limit signed CSV attribution.
+	return !at.Before(c.CreatedAt)
 }
 
 var factorFormat = regexp.MustCompile(`^(0\.[0-9]{2}|1\.00)$`)
@@ -62,7 +66,7 @@ func Issue(c Claims, customer, publisher string, factor string, sign Signer) ([5
 	if version == 0 {
 		version = CurrentVersion
 	}
-	if version != 1 && version != CurrentVersion {
+	if version < 1 || version > CurrentVersion {
 		return ids, errors.New("invalid tracking version")
 	}
 	b[0] = version
@@ -121,7 +125,7 @@ func Verify(ids [5]string, publisher string, sign Signer) (Claims, error) {
 	}
 	packet := make([]byte, 36)
 	n.FillBytes(packet)
-	if (packet[0] != 1 && packet[0] != CurrentVersion) || int(packet[33]) >= len(tiers) {
+	if packet[0] < 1 || packet[0] > CurrentVersion || int(packet[33]) >= len(tiers) {
 		return c, fail
 	}
 	c = Claims{Version: packet[0], CreatedAt: time.Unix(int64(binary.BigEndian.Uint32(packet[1:5])), 0).UTC(), Shop: binary.BigEndian.Uint64(packet[13:21]), Item: binary.BigEndian.Uint64(packet[21:29]), Policy: binary.BigEndian.Uint32(packet[29:33]), Tier: tiers[int(packet[33])], Bps: int(binary.BigEndian.Uint16(packet[34:]))}
