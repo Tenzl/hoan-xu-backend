@@ -41,7 +41,7 @@ func TestLinkRateEndpointsAndCeiling(t *testing.T) {
 }
 
 func TestPublicMembershipOnlyContainsEffectiveRanges(t *testing.T) {
-	p := &Policy{ID: "policy", Tax: 500, Tiers: []Tier{{Code:"bronze",MinGold:0,Min:6500,Max:7500}, {Code:"platinum",MinGold:30,Min:7500,Max:8500}, {Code:"diamond",MinGold:100,Min:8500,Max:9500}}}
+	p := &Policy{ID: "policy", Tax: 500, Tiers: []Tier{{Code: "bronze", MinGold: 0, Min: 6500, Max: 7500}, {Code: "platinum", MinGold: 30, Min: 7500, Max: 8500}, {Code: "diamond", MinGold: 100, Min: 8500, Max: 9500}}}
 	m := Select(p, 0)
 	public := m.Public()
 	raw, err := json.Marshal(public)
@@ -57,9 +57,43 @@ func TestPublicMembershipOnlyContainsEffectiveRanges(t *testing.T) {
 	// The 75% endpoint becomes 71%; the actual maximum is the interior 74% -> 71%.
 }
 
+func TestPublicMembershipIncludesAllConfiguredTiers(t *testing.T) {
+	p := periodPolicyForTest()
+	p.Tax = 500
+	p.Tiers[1].NameVI = "Bạc ưu tiên"
+	p.Tiers[1].NameEN = "Priority Silver"
+	for _, gold := range []int64{0, 3000000} {
+		raw, err := json.Marshal(SelectPeriod(p, 0, gold).Public())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var response struct {
+			Tiers []json.RawMessage `json:"tiers"`
+		}
+		if err := json.Unmarshal(raw, &response); err != nil {
+			t.Fatal(err)
+		}
+		if len(response.Tiers) != 4 {
+			t.Fatalf("want all four tiers at gold %d: %s", gold, raw)
+		}
+		for i, tier := range response.Tiers {
+			want, err := json.Marshal(publicTier(p.Tiers[i], int(p.Tax)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(tier, want) {
+				t.Fatalf("tier %d: got %s, want %s", i, tier, want)
+			}
+		}
+		if bytes.Contains(raw, []byte("tax")) || bytes.Contains(raw, []byte("Tax")) {
+			t.Fatalf("internal tax leaked: %s", raw)
+		}
+	}
+}
+
 func TestPolicyTaxInputAndRangeValidation(t *testing.T) {
-	valid := Input{CurrentVersionID: "11111111-1111-4111-8111-111111111111", Tax: 500, Tiers: []Tier{{Code:"bronze",MinGold:0,Min:6500,Max:7500}, {Code:"platinum",MinGold:30,Min:7500,Max:8500}, {Code:"diamond",MinGold:100,Min:8500,Max:9500}}}
-	valid=periodInputForUnit(valid)
+	valid := Input{CurrentVersionID: "11111111-1111-4111-8111-111111111111", Tax: 500, Tiers: []Tier{{Code: "bronze", MinGold: 0, Min: 6500, Max: 7500}, {Code: "platinum", MinGold: 30, Min: 7500, Max: 8500}, {Code: "diamond", MinGold: 100, Min: 8500, Max: 9500}}}
+	valid = periodInputForUnit(valid)
 	for _, change := range []func(*Input){
 		func(p *Input) { p.Tax = -1 }, func(p *Input) { p.Tax = 10001 },
 		func(p *Input) { p.Tiers[0].Max = 6900 }, func(p *Input) { p.Tiers[0].Min = 6550 }, func(p *Input) { p.Tiers[0].Max = 7550 },
@@ -91,7 +125,7 @@ func TestPolicyTaxInputAndRangeValidation(t *testing.T) {
 	if (LinkRate{EffectiveBps: 0}).Factor() != "0.00" || (LinkRate{EffectiveBps: 10000}).Factor() != "1.00" {
 		t.Fatal("factor format")
 	}
-	old := Select(&Policy{ID: "legacy", Tax: 500, Tiers: []Tier{{Code:"bronze",MinGold:0,Min:5000,Max:5000}}}, 0).Public()
+	old := Select(&Policy{ID: "legacy", Tax: 500, Tiers: []Tier{{Code: "bronze", MinGold: 0, Min: 5000, Max: 5000}}}, 0).Public()
 	if old.PreviewAvailable {
 		t.Fatal("invalid legacy policy forecast offered")
 	}

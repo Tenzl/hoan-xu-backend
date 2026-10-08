@@ -92,7 +92,8 @@ type Membership struct {
 	Tier
 	Tax Percent `json:"-"`
 	MembershipProgress
-	NextTier *Tier `json:"nextTier"`
+	NextTier *Tier  `json:"nextTier"`
+	Tiers    []Tier `json:"-"`
 }
 type Service struct{ Store *platform.Store }
 
@@ -116,7 +117,7 @@ func Current(ctx context.Context, q *db.Queries) (*Policy, error) {
 	return p, nil
 }
 func Select(p *Policy, gold int64) Membership {
-	m := Membership{PolicyID: p.ID, Tier: p.Tiers[0], Tax: p.Tax}
+	m := Membership{PolicyID: p.ID, Tier: p.Tiers[0], Tax: p.Tax, Tiers: p.Tiers}
 	m.PeriodGoldTotal = gold
 	for i, t := range p.Tiers {
 		if gold >= t.MinGold {

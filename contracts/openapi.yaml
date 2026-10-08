@@ -18719,6 +18719,15 @@
           },
           "nextPeriodNameEn": {
             "type": "string"
+          },
+          "tiers": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "items": {
+              "$ref": "#/components/schemas/PublicCashbackTier"
+            },
+            "description": "All four configured tiers with customer effective cashback ranges, ordered by minimum gold Xu in the period."
           }
         },
         "required": [
@@ -18750,7 +18759,8 @@
           "startingNameVi",
           "startingNameEn",
           "nextPeriodNameVi",
-          "nextPeriodNameEn"
+          "nextPeriodNameEn",
+          "tiers"
         ]
       },
       "Dashboard": {
