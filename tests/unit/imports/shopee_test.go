@@ -1,14 +1,27 @@
 package imports
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"hoanxu/internal/tracking"
 	"os"
 	"strings"
 	"testing"
 	"time"
 )
 
-const nativeCSV = "Order id,Conversion id,Order Status,Order Time,Shop id,Item id,Model id,Promotion id,Item Name,Purchase Value(₫),Item Total Commission(₫),Affiliate Item Status,Sub_id1,Sub_id2,Sub_id3,Sub_id4,Sub_id5\n260908EGG3Y5PS,242123456789012,Completed,2026-10-06 12:34:56,83496725,6939920023,247123456789,0,Product,31000,1234,Approved,customer,hoanxu,token,0p63,signature\n"
+var csvIDs = func() [5]string {
+	codec, err := tracking.NewCodec(`{"1":"`+base64.StdEncoding.EncodeToString(make([]byte, 32))+`"}`, "1")
+	if err != nil {
+		panic(err)
+	}
+	ids, err := codec.Issue(tracking.Claims{Customer: "12345678-1234-4321-8123-123456789012", Publisher: "123456789", CreatedAt: time.Unix(1700000000, 0).UTC(), Shop: 83496725, Item: 6939920023, Policy: 1, EffectiveBps: 6300})
+	if err != nil {
+		panic(err)
+	}
+	return ids
+}()
+var nativeCSV = "Order id,Conversion id,Order Status,Order Time,Shop id,Item id,Model id,Promotion id,Item Name,Purchase Value(₫),Item Total Commission(₫),Affiliate Item Status,Sub_id1,Sub_id2,Sub_id3,Sub_id4,Sub_id5\n260908EGG3Y5PS,242123456789012,Completed,2026-10-06 12:34:56,83496725,6939920023,247123456789,0,Product,31000,1234,Approved," + strings.Join(csvIDs[:], ",") + "\n"
 
 func TestShopeeCSVKeepsExactIDsTimeAndStableSourceKey(t *testing.T) {
 	rows, e := Parse(strings.NewReader(nativeCSV), nil)
@@ -16,7 +29,7 @@ func TestShopeeCSVKeepsExactIDsTimeAndStableSourceKey(t *testing.T) {
 		t.Fatal(e)
 	}
 	r := rows[0]
-	if r.Error != "" || r.Status != "approved" || r.Tracking != "token" || r.ConversionID != "242123456789012" || r.Commission != 1234 || r.Date.UTC().Format(time.RFC3339) != "2026-10-06T05:34:56Z" {
+	if r.Error != "" || r.Status != "approved" || len(r.Tracking) != 64 || r.ConversionID != "242123456789012" || r.Commission != 1234 || r.Date.UTC().Format(time.RFC3339) != "2026-10-06T05:34:56Z" {
 		t.Fatal(r)
 	}
 	double, e := Parse(strings.NewReader(nativeCSV+strings.Split(nativeCSV, "\n")[1]+"\n"), nil)
@@ -42,7 +55,7 @@ func TestShopeeActualExportShape(t *testing.T) {
 		t.Fatal("expected three report rows", err)
 	}
 	for _, row := range rows {
-		if row.Error != "" {
+		if row.Error != "Tracking v4 cần đủ năm phần đúng định dạng và vị trí" {
 			t.Fatal(row.Error)
 		}
 	}
@@ -61,7 +74,7 @@ func TestShopeeReportLimits(t *testing.T) {
 	header := strings.SplitN(nativeCSV, "\n", 2)[0] + "\n"
 	row := "A,1,Pending,2026-10-06 12:34:56,1,1,1,,P,0,0,Pending,,,,,\n"
 	rows, err := Parse(strings.NewReader(header+strings.Repeat(row, 50000)), nil)
-	if err != nil || len(rows) != 50000 || rows[0].Error != "" {
+	if err != nil || len(rows) != 50000 || rows[0].Error != "Tracking v4 cần đủ năm phần đúng định dạng và vị trí" {
 		t.Fatal("50,000-row boundary", err)
 	}
 	if _, err := Parse(strings.NewReader(header+strings.Repeat(row, 50001)), nil); err == nil {
@@ -71,7 +84,7 @@ func TestShopeeReportLimits(t *testing.T) {
 
 func TestShopeeReportDecimalsEmptyPromotionAndMetadata(t *testing.T) {
 	csv := strings.Replace(nativeCSV, "Sub_id5\n", "Sub_id5,Channel\n", 1)
-	csv = strings.Replace(csv, "signature\n", "signature,Zalo\n", 1)
+	csv = strings.Replace(csv, csvIDs[4]+"\n", csvIDs[4]+",Zalo\n", 1)
 	csv = strings.Replace(csv, ",0,Product,31000,1234,", ",,\"Product, quoted\",463832,20872.44,", 1)
 	rows, err := Parse(strings.NewReader("\ufeff"+csv), nil)
 	if err != nil || len(rows) != 1 {

@@ -3,6 +3,7 @@ package orders
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/jackc/pgx/v5"
 	"hoanxu/internal/cashback"
 	"hoanxu/internal/platform"
@@ -62,21 +63,31 @@ func (s *Service) EventTx(ctx context.Context, tx pgx.Tx, actor, id string, p Ev
 			if json.Unmarshal(subIDs, &ids) != nil {
 				return nil, platform.Fail(409, "INVALID_TRACKING", "Thiếu tracking đối soát.")
 			}
-			claims, err := tracking.Verify(ids, publisher, s.Store.SignTracking)
-			if err != nil || issued == nil || expires == nil || !claims.CreatedAt.Equal(*issued) || !claims.ExpiresAt().Equal(*expires) || !claims.Eligible(at) {
+			claims, err := s.Store.Tracking.Decode(ids)
+			if err != nil {
+				var missing *tracking.KeyError
+				if errors.As(err, &missing) {
+					return nil, platform.TrackingError(err)
+				}
+			}
+			if err != nil || claims.Customer != user || claims.Publisher != publisher || issued == nil || expires == nil || !claims.CreatedAt.Equal(*issued) || !claims.ExpiresAt().Equal(*expires) || !claims.Eligible(at) {
 				return nil, platform.Fail(409, "LINK_INELIGIBLE", "Tracking hoặc thời điểm phát hành không khớp đối soát.")
 			}
-			var tax int
-			if err = tx.QueryRow(ctx, `SELECT tax_bps FROM cashback_policies WHERE tracking_version=$1 AND id=$2`, claims.Policy, policyID).Scan(&tax); err != nil {
+			var policyMatches bool
+			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM cashback_policies WHERE id=$1 AND tracking_version=$2)`, policyID, claims.Policy).Scan(&policyMatches); err != nil {
 				return nil, err
 			}
-			effective, err := cashback.EffectiveRate(claims.Bps, tax)
-			expected, amountErr := cashback.AmountRoundedUp(commission, effective)
-			if err != nil || amountErr != nil || effective != bps || !tracking.MatchesFactor(ids[3], (cashback.LinkRate{EffectiveBps: effective}).Factor()) || expected != cash {
+			if !policyMatches {
+				return nil, platform.Fail(409, "INVALID_TRACKING", "Phiên bản chính sách không hợp lệ")
+			}
+			code, codeErr := tracking.Code(ids)
+			expected, amountErr := cashback.AmountRoundedUp(commission, claims.EffectiveBps)
+			if codeErr != nil || code != lockCode || amountErr != nil || claims.EffectiveBps != bps || expected != cash {
 				return nil, platform.Fail(409, "INVALID_TRACKING", "Tỷ lệ hoặc tiền hoàn không khớp đối soát.")
 			}
+
 			var matches bool
-			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND tracking_code=$2 AND role='customer' AND NOT blocked)`, user, ids[0]).Scan(&matches); err != nil {
+			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND role='customer' AND NOT blocked)`, user).Scan(&matches); err != nil {
 				return nil, err
 			}
 			if !matches {

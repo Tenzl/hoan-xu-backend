@@ -12,7 +12,6 @@ import (
 
 	"hoanxu/internal/affiliate"
 	"hoanxu/internal/auth"
-	"hoanxu/internal/tracking"
 )
 
 func TestForeignAffiliateInputUsesOwnAttributionAndCanonicalURL(t *testing.T) {
@@ -37,16 +36,14 @@ func TestForeignAffiliateInputUsesOwnAttributionAndCanonicalURL(t *testing.T) {
 	if err = s.Pool.QueryRow(ctx, `SELECT tracking_code FROM users WHERE id=$1`, customer).Scan(&code); err != nil {
 		t.Fatal(err)
 	}
-	if original != "https://shopee.vn/product/264049024/27783958254" || f.shop != "264049024" || f.item != "27783958254" || f.ids[0] != code {
+	if original != "https://shopee.vn/product/264049024/27783958254" || f.shop != "264049024" || f.item != "27783958254" || f.ids[0] == code {
 		t.Fatal(original, f.shop, f.item, f.ids[0])
 	}
-	claims, err := tracking.Verify(f.ids, "123456789", s.SignTracking)
-	if err != nil || claims.Shop != 264049024 || claims.Item != 27783958254 {
+	claims, err := s.Tracking.Decode(f.ids)
+	if err != nil || claims.Customer != customer || claims.Publisher != "123456789" || claims.Shop != 264049024 || claims.Item != 27783958254 {
 		t.Fatal(claims, err)
 	}
-	if _, err = tracking.Verify(f.ids, "foreign-publisher", s.SignTracking); err == nil {
-		t.Fatal("foreign publisher accepted")
-	}
+
 	for _, id := range f.ids {
 		if strings.Contains(id, "foreign") || strings.Contains(id, "discard") {
 			t.Fatal("input attribution copied")

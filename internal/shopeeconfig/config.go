@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"hoanxu/internal/browser"
 	"hoanxu/internal/platform"
+	"hoanxu/internal/tracking"
 	"net/url"
 	"path/filepath"
 	"strconv"
@@ -52,7 +53,11 @@ func (c Config) Fingerprint() string {
 		fields.ProfilePath = ""
 		fields.ExecutablePath = ""
 	}
-	raw, _ := json.Marshal(fields)
+	raw, _ := json.Marshal(struct {
+		Fields          Fields
+		TrackingVersion uint8
+		TrackingFormat  string
+	}{fields, tracking.CurrentVersion, tracking.FormatID})
 	return platform.Hash(string(raw))
 }
 func parse(raw []byte, origin string) (Config, map[string]json.RawMessage, error) {
@@ -201,6 +206,11 @@ func Save(ctx context.Context, s *platform.Store, origin, actor string, in Input
 		next.VerifiedFingerprint = ""
 		next.TrackingVerified = false
 		next.SchemaVerified = false
+	}
+	if next.Enabled {
+		if err := s.Tracking.Ready(); err != nil {
+			return old, platform.TrackingError(err)
+		}
 	}
 	if next.Enabled && (!next.TrackingVerified || next.Publisher == "") {
 		return old, platform.Fail(409, "TRACKING_NOT_VERIFIED", "Cần kiểm tra sản phẩm và tracking thành công trước khi cho khách tạo link.")

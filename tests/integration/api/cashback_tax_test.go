@@ -11,7 +11,6 @@ import (
 	"hoanxu/internal/cashback"
 	"hoanxu/internal/imports"
 	"hoanxu/internal/platform"
-	"hoanxu/internal/tracking"
 )
 
 func TestTaxSnapshotUsesArchivedPolicyAndActualCommission(t *testing.T) {
@@ -29,7 +28,7 @@ func TestTaxSnapshotUsesArchivedPolicyAndActualCommission(t *testing.T) {
 	if _, err = policies.Create(ctx, admin, "tax-policy-first", periodFixtureInput(current.ID, tiers, 500)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Pool.Exec(ctx, `UPDATE affiliate_channels SET status='available',settings='{"publisher":"fixture"}' WHERE id='shopee'`); err != nil {
+	if _, err = s.Pool.Exec(ctx, `UPDATE affiliate_channels SET status='available',settings='{"publisher":"123456789"}' WHERE id='shopee'`); err != nil {
 		t.Fatal(err)
 	}
 	fixture := &offerLinkFixture{}
@@ -40,15 +39,12 @@ func TestTaxSnapshotUsesArchivedPolicyAndActualCommission(t *testing.T) {
 	}
 	result := raw.(map[string]any)
 	ids := fixture.ids
-	claims, err := tracking.Verify(ids, "fixture", s.SignTracking)
+	claims, err := s.Tracking.Decode(ids)
 	if err != nil {
 		t.Fatal(err)
 	}
-	effective, err := cashback.EffectiveRate(claims.Bps, 500)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !tracking.MatchesFactor(ids[3], (cashback.LinkRate{EffectiveBps: effective}).Factor()) || result["payoutFactor"] != (cashback.LinkRate{EffectiveBps: effective}).Factor() {
+	effective := claims.EffectiveBps
+	if claims.EffectiveBps != effective || result["payoutFactor"] != (cashback.LinkRate{EffectiveBps: effective}).Factor() {
 		t.Fatal(result, ids)
 	}
 	for _, field := range []string{"taxPercent", "taxBps", "fixedCashback", "promisedCashback"} {
@@ -73,7 +69,8 @@ func TestTaxSnapshotUsesArchivedPolicyAndActualCommission(t *testing.T) {
 	if _, err = service.CreateLink(ctx, customer, "https://shopee.vn/product/1/2"); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.ids[3] != "0p00" {
+	newClaims, decodeErr := s.Tracking.Decode(fixture.ids)
+	if decodeErr != nil || newClaims.EffectiveBps != 0 {
 		t.Fatalf("new tax did not apply: %v", fixture.ids)
 	}
 	membership, err := cashback.MembershipFor(ctx, s.Queries, customer)
@@ -94,7 +91,7 @@ func TestTaxSnapshotUsesArchivedPolicyAndActualCommission(t *testing.T) {
 	// Two different orders use the same signed factor, even after tax changes.
 	rows := []imports.Row{}
 	for i, commission := range []int64{10001, 20001} {
-		rows = append(rows, imports.Row{Channel: "shopee", Publisher: "fixture", OrderID: fmt.Sprintf("tax-order-%d", i), LineID: "line", Tracking: ids[2], NativeShopee: true, SubIDs: ids, ShopID: "1", ItemID: "2", Date: claims.CreatedAt.Add(time.Hour), Name: "Product", Value: 100000, Commission: commission, Status: "approved"})
+		rows = append(rows, imports.Row{Channel: "shopee", Publisher: "123456789", OrderID: fmt.Sprintf("tax-order-%d", i), LineID: "line", Tracking: fixtureCode(ids), NativeShopee: true, SubIDs: ids, ShopID: "1", ItemID: "2", Date: claims.CreatedAt.Add(time.Hour), Name: "Product", Value: 100000, Commission: commission, Status: "approved"})
 	}
 	importer := &imports.Service{Store: s}
 	batch, err := importer.Preview(ctx, admin, "tax.csv", platform.Hash("tax-snapshot-actual"), nil, rows)

@@ -11764,7 +11764,7 @@
             }
           },
           "403": {
-            "description": "Invalid CSRF token or read-only legacy link",
+            "description": "Invalid CSRF token",
             "content": {
               "application/json": {
                 "schema": {
@@ -17583,20 +17583,13 @@
           "status": {
             "type": "string",
             "enum": [
-              "active",
-              "progress",
-              "completed",
-              "cancelled",
-              "legacy"
+              "active"
             ],
-            "description": "Saved-list state only; signed visible links return active independently of order state. Historical links return legacy."
+            "description": "Active saved link; order status is tracked separately."
           },
           "canDelete": {
             "type": "boolean",
-            "description": "True for an owned signed saved link. Physical deletion preserves orders and wallet history; legacy links remain read-only."
-          },
-          "legacy": {
-            "type": "boolean"
+            "description": "True for an owned saved link. Deletion preserves orders and wallet history."
           },
           "expiresAt": {
             "format": "date-time",
@@ -17618,7 +17611,7 @@
           "productName": {
             "type": "string",
             "nullable": true,
-            "description": "Product name captured by the verified server checker; legacy links may be unnamed."
+            "description": "Product name captured by the verified server checker."
           },
           "tierNameVi": {
             "type": "string",
@@ -17648,7 +17641,6 @@
           "maxSharePercent",
           "status",
           "canDelete",
-          "legacy",
           "expiresAt",
           "effectiveSharePercent",
           "payoutFactor",
@@ -18991,24 +18983,18 @@
           "status": {
             "type": "string",
             "enum": [
-              "active",
-              "progress",
-              "completed",
-              "cancelled"
+              "active"
             ],
-            "description": "Saved-list state only; signed visible links return active independently of order state. Historical links return legacy."
+            "description": "Active saved link; order status is tracked separately."
           },
           "canDelete": {
             "type": "boolean",
-            "description": "True for an owned signed saved link. Physical deletion preserves orders and wallet history; legacy links remain read-only."
-          },
-          "legacy": {
-            "type": "boolean"
+            "description": "True for an owned saved link. Deletion preserves orders and wallet history."
           },
           "productName": {
             "type": "string",
             "nullable": false,
-            "description": "Product name captured by the verified server checker; legacy links may be unnamed."
+            "description": "Product name captured by the verified server checker."
           },
           "tierNameVi": {
             "type": "string",
@@ -19044,7 +19030,6 @@
           "id",
           "status",
           "canDelete",
-          "legacy",
           "autoDeleteAt"
         ],
         "description": "New or reused signed Shopee link. Saved for five days; CSV attribution remains valid after saved-link deletion or retention expiry. New link: 201; reused link: 200."
@@ -19680,8 +19665,7 @@
               "selecting",
               "progress",
               "completed",
-              "rejected",
-              "legacy"
+              "rejected"
             ]
           },
           "sortAt": {

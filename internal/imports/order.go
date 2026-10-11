@@ -49,6 +49,6 @@ func InsertAttributedOrder(ctx context.Context, tx pgx.Tx, row *Row, a Attributi
 	ids, _ := json.Marshal(row.SubIDs)
 	report, _ := json.Marshal(row.ReportMetadata)
 	var id string
-	e = tx.QueryRow(ctx, `INSERT INTO orders(user_id,policy_id,channel,publisher,external_id,line_id,product_name,value,commission,cashback,ordered_at,source_status,tier_code,share_bps,status,tracking_code,tracking_sub_ids,link_created_at,link_expires_at,cashback_mode,source_report) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'signed_link',$20) RETURNING id::text`, a.User, a.Policy, row.Channel, row.Publisher, row.OrderID, row.LineID, row.Name, row.Value, row.Commission, cash, row.Date, row.Status, a.Claims.Tier, a.EffectiveBps, next, row.Tracking, ids, a.Claims.CreatedAt, a.Claims.ExpiresAt(), report).Scan(&id)
+	e = tx.QueryRow(ctx, `INSERT INTO orders(user_id,policy_id,channel,publisher,external_id,line_id,product_name,value,commission,cashback,ordered_at,source_status,tier_code,share_bps,status,tracking_code,tracking_sub_ids,link_created_at,link_expires_at,cashback_mode,source_report) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'signed_link',$20) RETURNING id::text`, a.User, a.Policy, row.Channel, row.Publisher, row.OrderID, row.LineID, row.Name, row.Value, row.Commission, cash, row.Date, row.Status, nil, a.EffectiveBps, next, row.Tracking, ids, a.Claims.CreatedAt, a.Claims.ExpiresAt(), report).Scan(&id)
 	return id, cash, e
 }

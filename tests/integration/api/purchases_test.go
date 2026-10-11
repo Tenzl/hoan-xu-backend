@@ -18,7 +18,7 @@ func verifiedLinkProduct(ctx context.Context, raw string) (any, error) {
 	return map[string]any{"schemaVerified": true, "shopId": shop, "itemId": item, "productName": "Shopee product"}, err
 }
 
-func TestPurchasesFeedOwnsFiltersAndPreservesDeletedAndLegacyLinks(t *testing.T) {
+func TestPurchasesFeedPreservesOrdersAndExcludesUnsupportedLinks(t *testing.T) {
 	s, customer, admin := testStore(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -83,10 +83,10 @@ func TestPurchasesFeedOwnsFiltersAndPreservesDeletedAndLegacyLinks(t *testing.T)
 		t.Fatal(pending)
 	}
 	all := read("status=all&perPage=20")
-	if len(all) != 5 {
+	if len(all) != 4 {
 		t.Fatal(all)
 	}
-	matched, orphanFound, legacyFound := 0, false, false
+	matched, orphanFound := 0, false
 	for _, record := range all {
 		if record["link"] == nil {
 			if record["kind"] == "order" {
@@ -105,10 +105,10 @@ func TestPurchasesFeedOwnsFiltersAndPreservesDeletedAndLegacyLinks(t *testing.T)
 			}
 		}
 		if link["id"] == legacy {
-			legacyFound = link["legacy"] == true
+			t.Fatal("unsupported unsigned link appeared", record)
 		}
 	}
-	if matched != 1 || !orphanFound || !legacyFound {
+	if matched != 1 || !orphanFound {
 		t.Fatal("lost or duplicated records", all)
 	}
 	first := read("status=all&perPage=2&page=1")
@@ -145,18 +145,12 @@ func TestPurchasesFeedOwnsFiltersAndPreservesDeletedAndLegacyLinks(t *testing.T)
 	if _, err := s.Pool.Exec(ctx, `INSERT INTO orders(user_id,link_id,policy_id,channel,publisher,external_id,line_id,product_name,value,commission,cashback,share_bps,ordered_at) SELECT $1,$2,policy_id,'shopee','legacy','OLD-NAMED','OLD-NAMED','Legacy product name',100000,10000,6000,6000,now() FROM affiliate_links WHERE id=$2`, customer, legacy); err != nil {
 		t.Fatal(err)
 	}
-	legacyMatches := 0
 	for _, record := range read("status=all&perPage=20") {
 		if link, ok := record["link"].(map[string]any); ok && link["id"] == legacy {
-			legacyMatches++
-			if record["kind"] != "order" || link["productName"] != "Legacy product name" || link["canDelete"] != false {
-				t.Fatal("legacy order was not merged with its named read-only link", record)
-			}
+			t.Fatal("unsupported link appeared alongside an order", record)
 		}
 	}
-	if legacyMatches != 1 {
-		t.Fatal("duplicate or missing legacy link", legacyMatches)
-	}
+
 }
 
 func TestCreatedLinkIncludesProductName(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"hoanxu/internal/affiliate"
+	"hoanxu/internal/browser"
 	"hoanxu/internal/imports"
 	"hoanxu/internal/orders"
 	"sync"
@@ -14,9 +15,9 @@ import (
 
 type countedOffer struct{ calls atomic.Int32 }
 
-func (f *countedOffer) CreateOfferLink(context.Context, string, string, [5]string) (string, error) {
+func (f *countedOffer) CreateCustomLinks(context.Context, []browser.CustomLinkParam) ([]browser.CustomLinkResult, error) {
 	f.calls.Add(1)
-	return "https://s.shopee.vn/reuse", nil
+	return []browser.CustomLinkResult{{URL: "https://s.shopee.vn/reuse"}}, nil
 }
 
 func TestSameProductReusesValidLinkAcrossConcurrentServices(t *testing.T) {

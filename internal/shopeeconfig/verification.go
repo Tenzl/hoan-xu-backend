@@ -21,6 +21,9 @@ type Verification struct {
 }
 
 func StartVerification(ctx context.Context, s *platform.Store, origin, actor, version, productURL string) (Verification, Config, error) {
+	if err := s.Tracking.Ready(); err != nil {
+		return Verification{}, Default(), platform.TrackingError(err)
+	}
 	tx, cfg, _, err := lock(ctx, s, origin)
 	if err != nil {
 		return Verification{}, cfg, err

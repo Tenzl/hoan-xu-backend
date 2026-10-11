@@ -12,6 +12,7 @@ import (
 
 	"hoanxu/internal/affiliate"
 	"hoanxu/internal/auth"
+	"hoanxu/internal/browser"
 	"hoanxu/internal/platform"
 )
 
@@ -22,14 +23,18 @@ type offerLinkFixture struct {
 	ids                  [5]string
 }
 
-func (f *offerLinkFixture) CreateOfferLink(_ context.Context, shop, item string, ids [5]string) (string, error) {
-	f.shop, f.item, f.tracking = shop, item, ids[2]
+func (f *offerLinkFixture) CreateCustomLinks(_ context.Context, params []browser.CustomLinkParam) ([]browser.CustomLinkResult, error) {
+	if len(params) != 1 {
+		return nil, errors.New("single-link fixture requires a one-item batch")
+	}
+	shop, item, ids := params[0].Shop, params[0].Item, params[0].SubIDs
+	f.shop, f.item, f.tracking = shop, item, fixtureCode(ids)
 	f.ids = ids
 	f.customerTracking = ids[0]
 	if f.err != nil {
-		return "", f.err
+		return nil, f.err
 	}
-	return "https://s.shopee.vn/3B7ybQjO2E", nil
+	return []browser.CustomLinkResult{{URL: "https://s.shopee.vn/3B7ybQjO2E"}}, nil
 }
 
 func TestCustomerTrackingIsStableAcrossShopeeLinksAndIsolatedBetweenCustomers(t *testing.T) {
@@ -56,8 +61,9 @@ func TestCustomerTrackingIsStableAcrossShopeeLinksAndIsolatedBetweenCustomers(t 
 		}
 		l := result.(map[string]any)
 		tracking := l["trackingCode"].(string)
-		if f.customerTracking != tc.code {
-			t.Fatal("subId1 did not use the customer's permanent code")
+		claims, err := s.Tracking.Decode(f.ids)
+		if err != nil || claims.Customer != tc.user || f.ids[0] == tc.code {
+			t.Fatal("encrypted customer attribution mismatch", err)
 		}
 		if tracking == tc.code || tracking != f.tracking || seen[tracking] {
 			t.Fatal("per-link tracking must remain distinct and unique")
@@ -87,7 +93,7 @@ func TestCreateLinkPersistsSignedSnapshotWithoutCreatingOrders(t *testing.T) {
 	if e := s.Pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM affiliate_links)+(SELECT count(*) FROM orders)`).Scan(&count); e != nil || count != 1 {
 		t.Fatal("generation must save one link only", count, e)
 	}
-	if l["id"] == nil || l["status"] != "active" || l["canDelete"] != true || l["affiliateUrl"] != "https://s.shopee.vn/3B7ybQjO2E" || l["payoutFactor"] == nil || l["expiresAt"] == nil || len(f.ids[2]) != 49 || f.ids[3] == "" || len(f.ids[4]) != 32 {
+	if l["id"] == nil || l["status"] != "active" || l["canDelete"] != true || l["affiliateUrl"] != "https://s.shopee.vn/3B7ybQjO2E" || l["payoutFactor"] == nil || l["expiresAt"] == nil || len(f.ids[2]) > 29 || f.ids[3] == "" || len(f.ids[4]) > 29 {
 		t.Fatal(l, f.ids)
 	}
 	f.err = errors.New("SHOPEE_UPSTREAM_FAILED")

@@ -3,11 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"hoanxu/internal/affiliate"
 	"hoanxu/internal/auth"
@@ -34,7 +34,8 @@ func TestCreatedLinkHistoryWithoutSaving(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, owner := range []string{customer, customer, customer, other} {
-		_, err = store.Pool.Exec(ctx, `INSERT INTO affiliate_links(user_id,channel,original_url,affiliate_url,tracking_code,policy_id,tier_code,min_share_bps,max_share_bps,created_at) SELECT $1,'shopee','https://shopee.vn/product/1/2','https://s.shopee.vn/test',$2,id,'bronze',2222,2224,'2026-10-05T00:00:00Z' FROM cashback_policies WHERE mode='tiered' ORDER BY created_at DESC,id DESC LIMIT 1`, owner, fmt.Sprintf("history-%d", i))
+		id, _ := savedFixture(t, store, owner, time.Now().UTC().Add(-time.Duration(i)*time.Second).Truncate(time.Second))
+		_, err = store.Pool.Exec(ctx, `UPDATE affiliate_links SET min_share_bps=2222,max_share_bps=2224 WHERE id=$1`, id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -50,6 +51,14 @@ func TestCreatedLinkHistoryWithoutSaving(t *testing.T) {
 		return w
 	}
 	seen := map[string]bool{}
+	if w := request(http.MethodPost, "/affiliate-links/batch", `{"urls":["https://shopee.vn/product/1/2","https://shopee.vn/product/1/3"]}`); w.Code != http.StatusMethodNotAllowed && w.Code != http.StatusNotFound {
+		t.Fatal("multi-link creation route remains available", w.Code)
+	}
+	for _, body := range []string{`{"urls":["https://shopee.vn/product/1/2"]}`, `{"url":"https://shopee.vn/product/1/2","urls":["https://shopee.vn/product/1/3"]}`} {
+		if w := request(http.MethodPost, "/affiliate-links", body); w.Code != http.StatusBadRequest {
+			t.Fatal("multi-link input was accepted", w.Code, w.Body.String())
+		}
+	}
 	path := "/affiliate-links?perPage=2"
 	for _, count := range []int{2, 1} {
 		w := request(http.MethodGet, path, "")
@@ -70,7 +79,7 @@ func TestCreatedLinkHistoryWithoutSaving(t *testing.T) {
 		}
 		for _, link := range response.Data {
 			id := link["id"].(string)
-			if seen[id] || link["trackingCode"] == "history-3" {
+			if seen[id] {
 				t.Fatal("duplicate or another user's link", link)
 			}
 			seen[id] = true

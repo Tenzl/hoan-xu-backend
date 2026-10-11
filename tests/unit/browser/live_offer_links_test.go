@@ -48,20 +48,20 @@ func TestLiveShopeeSignedSubIDs(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	ids, e := tracking.Issue(tracking.Claims{CreatedAt: time.Now().UTC().Truncate(time.Second), Shop: 83496725, Item: 6939920023, Policy: 1, Tier: "bronze", Bps: 6600}, platform.Hash("native-gql-acceptance")[:20], "acceptance-test", "0.63", store.SignTracking)
+	ids, e := store.Tracking.Issue(tracking.Claims{Customer: "00000000-0000-4000-8000-000000000001", Publisher: os.Getenv("SHOPEE_LIVE_PUBLISHER"), CreatedAt: time.Now().UTC().Truncate(time.Second), Shop: 83496725, Item: 6939920023, Policy: 1, EffectiveBps: 6300})
 	if e != nil {
 		t.Fatal(e)
 	}
-	claims, e := tracking.Verify(ids, "acceptance-test", store.SignTracking)
+	claims, e := store.Tracking.Decode(ids)
 	if e != nil || claims.Version != tracking.CurrentVersion || claims.ExpiresAt().Sub(claims.CreatedAt) != tracking.Lifetime {
 		t.Fatal("expected current five-day token", claims, e)
 	}
-	short, e := m.CreateOfferLink(ctx, "83496725", "6939920023", ids)
+	links, e := m.CreateCustomLinks(ctx, []CustomLinkParam{{Shop: "83496725", Item: "6939920023", SubIDs: ids}})
 	if e != nil {
 		t.Fatal(e)
 	}
-	if short == "" {
-		t.Fatal("missing short URL")
+	if len(links) != 1 || links[0].URL == "" || links[0].Err != nil {
+		t.Fatal("missing short URL", links)
 	}
-	t.Log("Native Shopee GQL accepted all five exact SubIDs, including 49-character token, factor and 32-character signature")
+	t.Log("Native Shopee GQL accepted v4 carriers; real CSV round-trip still requires confirmation")
 }

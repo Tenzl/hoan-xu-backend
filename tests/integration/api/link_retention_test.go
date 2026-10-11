@@ -106,22 +106,18 @@ func TestPhysicalDeletionDetachesReferencedOrdersWithoutLosingTracking(t *testin
 	}
 }
 
-func TestFiveDayCleanupDeletesLinksEvenWithPendingOrdersAndRetainsLegacy(t *testing.T) {
+func TestFiveDayCleanupDeletesLinksEvenWithPendingOrders(t *testing.T) {
 	s, user, admin := testStore(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 	expired, row := savedFixture(t, s, user, now.Add(-5*24*time.Hour))
 	importRows(t, s, admin, []imports.Row{row})
 	active, _ := savedFixture(t, s, user, now.Add(-5*24*time.Hour+time.Second))
-	legacy, _ := savedFixture(t, s, user, now.Add(-10*24*time.Hour))
-	if _, err := s.Pool.Exec(ctx, `UPDATE affiliate_links SET tracking_sub_ids=NULL,expires_at=NULL,lifecycle_status=NULL WHERE id=$1`, legacy); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := (&affiliate.Service{Store: s}).PurgeExpired(ctx, now); err != nil {
 		t.Fatal(err)
 	}
 	var removed, kept, orderCount int
-	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FILTER(WHERE id=$1),count(*) FILTER(WHERE id IN ($2,$3)),(SELECT count(*) FROM orders) FROM affiliate_links`, expired, active, legacy).Scan(&removed, &kept, &orderCount); err != nil || removed != 0 || kept != 2 || orderCount != 1 {
+	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FILTER(WHERE id=$1),count(*) FILTER(WHERE id=$2),(SELECT count(*) FROM orders) FROM affiliate_links`, expired, active).Scan(&removed, &kept, &orderCount); err != nil || removed != 0 || kept != 1 || orderCount != 1 {
 		t.Fatal(removed, kept, orderCount, err)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"hoanxu/internal/orders"
 	"hoanxu/internal/platform"
 	"hoanxu/internal/rewards"
+	"hoanxu/internal/tracking"
 	"hoanxu/internal/wallet"
 	"net/http"
 	"net/http/httptest"
@@ -258,6 +259,10 @@ func testStoreWithTiers(t *testing.T, tiers bool) (*platform.Store, string, stri
 	if e != nil {
 		t.Fatal(e)
 	}
+	s.Tracking, e = tracking.NewCodec(`{"1":"`+base64.StdEncoding.EncodeToString([]byte(strings.Repeat("t", 32)))+`"}`, "1")
+	if e != nil {
+		t.Fatal(e)
+	}
 	var uid, admin string
 	e = pool.QueryRow(ctx, `INSERT INTO users(name,email,role) VALUES('Customer','test@example.com','customer') RETURNING id::text`).Scan(&uid)
 	if e != nil {
@@ -475,4 +480,20 @@ func TestHTTPAuthCSRFAndPermissions(t *testing.T) {
 		t.Fatal(e)
 	}
 	_ = time.Now()
+}
+
+// Fixtures issue only v4; customer tracking_code is never a public Sub ID.
+func fixtureTracking(t *testing.T, s *platform.Store, c tracking.Claims, user string) ([5]string, error) {
+	t.Helper()
+	c.Customer = user
+	c.Publisher = "123456789"
+	c.EffectiveBps = 6300
+	return s.Tracking.Issue(c)
+}
+func fixtureCode(ids [5]string) string {
+	code, err := tracking.Code(ids)
+	if err != nil {
+		panic(err)
+	}
+	return code
 }

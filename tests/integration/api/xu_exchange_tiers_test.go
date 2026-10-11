@@ -182,7 +182,7 @@ func TestXuExchangeRejectsChangedMembershipPolicy(t *testing.T) {
 		p.Tiers[i].Min = 1000
 		p.Tiers[i].Max = 2000
 	}
-	_, e = (&cashback.Service{Store: s}).Create(ctx, admin, "exchange-membership-change", cashback.Input{CurrentVersionID: p.ID, Tiers: p.Tiers, Tax: p.Tax, PeriodConfig:p.PeriodConfig})
+	_, e = (&cashback.Service{Store: s}).Create(ctx, admin, "exchange-membership-change", cashback.Input{CurrentVersionID: p.ID, Tiers: p.Tiers, Tax: p.Tax, PeriodConfig: p.PeriodConfig})
 	if e != nil {
 		t.Fatal(e)
 	}

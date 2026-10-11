@@ -3,6 +3,7 @@ package imports
 import (
 	"encoding/csv"
 	"errors"
+	"hoanxu/internal/tracking"
 	"io"
 	"regexp"
 	"strconv"
@@ -86,12 +87,15 @@ func parseShopee(r *csv.Reader, header []string) ([]Row, error) {
 			row.Error = "Thông tin nguồn Shopee quá dài"
 		}
 		for i := range row.SubIDs {
-			row.SubIDs[i] = get("Sub_id" + strconv.Itoa(i+1))
+			row.SubIDs[i] = record[columns["Sub_id"+strconv.Itoa(i+1)]]
 			if len(row.SubIDs[i]) > 50 {
 				row.Error = "Sub_id vượt quá 50 ký tự"
 			}
 		}
-		row.Tracking = row.SubIDs[2]
+		row.Tracking, e = tracking.Code(row.SubIDs)
+		if e != nil {
+			row.Error = "Tracking v4 cần đủ năm phần đúng định dạng và vị trí"
+		}
 		if len(row.OrderID) > 100 || !orderID.MatchString(row.OrderID) {
 			row.Error = "Order id không hợp lệ"
 		}

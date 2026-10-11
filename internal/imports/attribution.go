@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/jackc/pgx/v5"
-	"hoanxu/internal/cashback"
+
 	"hoanxu/internal/platform"
 	"hoanxu/internal/tracking"
 	"strconv"
@@ -21,79 +21,59 @@ type Attribution struct {
 	EffectiveBps int
 }
 
-// Attribute validates a native report against the signed promise and archived policy.
-// It never trusts an administrator-supplied customer or a currently active policy.
+// Attribute uses the authenticated snapshot; saved links and policy rates are
+// deliberately absent from reconciliation. Policies remain audit references.
 func Attribute(ctx context.Context, tx pgx.Tx, s *platform.Store, row *Row) (Attribution, error) {
 	var a Attribution
-	if !row.NativeShopee || row.Channel != "shopee" || row.SubIDs[1] != "hoanxu" {
+	if !row.NativeShopee || row.Channel != "shopee" {
 		return a, ineligible("Không thuộc chiến dịch Hoàn Xu hoặc dùng mã link cũ")
 	}
-	var publisher string
-	rows, e := tx.Query(ctx, `SELECT publisher FROM tracking_publishers UNION SELECT settings->>'publisher' FROM affiliate_channels WHERE id='shopee' AND coalesce(settings->>'publisher','')<>''`)
-	if e != nil {
-		return a, e
-	}
-	var candidates []string
-	for rows.Next() {
-		var candidate string
-		if e = rows.Scan(&candidate); e != nil {
-			rows.Close()
-			return a, e
+	c, err := s.Tracking.Decode(row.SubIDs)
+	if err != nil {
+		var missing *tracking.KeyError
+		if errors.As(err, &missing) {
+			return a, platform.TrackingError(err)
 		}
-		candidates = append(candidates, candidate)
+		return a, ineligible("Tracking v4 không hợp lệ hoặc sai xác thực")
 	}
-	e = rows.Err()
-	rows.Close()
-	if e != nil {
-		return a, e
+	if row.Publisher != "" && row.Publisher != c.Publisher {
+		return a, ineligible("Affiliate ID không hợp lệ")
 	}
-	var c tracking.Claims
-	matches := 0
-	for _, candidate := range candidates {
-		if row.Publisher != "" && row.Publisher != candidate {
-			continue
-		}
-		claims, err := tracking.Verify(row.SubIDs, candidate, s.SignTracking)
-		if err == nil {
-			matches++
-			publisher, c = candidate, claims
-		}
+	var authorized bool
+	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tracking_publishers WHERE publisher=$1 UNION ALL SELECT 1 FROM affiliate_channels WHERE id='shopee' AND settings->>'publisher'=$1)`, c.Publisher).Scan(&authorized)
+	if err != nil {
+		return a, err
 	}
-	if matches != 1 {
-		return a, ineligible("Chữ ký tracking hoặc Affiliate ID không hợp lệ")
+	if !authorized {
+		return a, ineligible("Affiliate ID không hợp lệ")
 	}
-	row.Publisher = publisher
 	if row.ShopID != strconv.FormatUint(c.Shop, 10) || row.ItemID != strconv.FormatUint(c.Item, 10) {
 		return a, ineligible("Sản phẩm không khớp link Hoàn Xu")
 	}
 	if !c.Eligible(row.Date) {
 		return a, ineligible("Order Time trước thời điểm phát hành tracking")
 	}
-	e = tx.QueryRow(ctx, `SELECT id::text FROM users WHERE tracking_code=$1 AND role='customer' AND NOT blocked`, row.SubIDs[0]).Scan(&a.User)
-	if e == pgx.ErrNoRows {
+	err = tx.QueryRow(ctx, `SELECT id::text FROM users WHERE id=$1 AND role='customer' AND NOT blocked`, c.Customer).Scan(&a.User)
+	if err == pgx.ErrNoRows {
 		return a, ineligible("Khách hàng không hợp lệ")
 	}
-	if e != nil {
-		return a, e
+	if err != nil {
+		return a, err
 	}
-	var min, max, tax int
-	e = tx.QueryRow(ctx, `SELECT p.id::text,t.min_share_bps,t.max_share_bps,p.tax_bps FROM cashback_policies p JOIN cashback_tiers t ON t.policy_id=p.id WHERE p.tracking_version=$1 AND t.tier_code=$2`, c.Policy, c.Tier).Scan(&a.Policy, &min, &max, &tax)
-	if e == pgx.ErrNoRows {
+	err = tx.QueryRow(ctx, `SELECT id::text FROM cashback_policies WHERE tracking_version=$1`, c.Policy).Scan(&a.Policy)
+	if err == pgx.ErrNoRows {
 		return a, ineligible("Phiên bản chính sách không hợp lệ")
 	}
-	if e != nil {
-		return a, e
+	if err != nil {
+		return a, err
 	}
-	if c.Bps < min || c.Bps > max {
-		return a, ineligible("Tỷ lệ đã chốt không hợp lệ")
+	row.Publisher = c.Publisher
+	row.Tracking, err = tracking.Code(row.SubIDs)
+	if err != nil {
+		return a, err
 	}
-	effective, e := cashback.EffectiveRate(c.Bps, tax)
-	if e != nil || !tracking.MatchesFactor(row.SubIDs[3], (cashback.LinkRate{EffectiveBps: effective}).Factor()) {
-		return a, ineligible("Hệ số hoàn Xu không khớp chính sách")
-	}
-	row.Tracking = row.SubIDs[2]
 	a.Claims = c
-	a.EffectiveBps = effective
+	a.EffectiveBps = c.EffectiveBps
 	return a, nil
 }
 
@@ -113,15 +93,6 @@ func validateRow(ctx context.Context, tx pgx.Tx, s *platform.Store, row *Row) (s
 		}
 		return "valid", nil
 	}
-	// Legacy tracking is usable solely for updating an existing order.
-	var exists bool
-	e := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM orders o LEFT JOIN affiliate_links l ON l.id=o.link_id WHERE o.channel=$1 AND o.publisher=$2 AND o.external_id=$3 AND o.line_id=$4 AND coalesce(o.tracking_code,l.tracking_code)=$5 AND o.cashback_mode='commission_share')`, row.Channel, row.Publisher, row.OrderID, row.LineID, row.Tracking).Scan(&exists)
-	if e != nil {
-		return "", e
-	}
-	if exists {
-		return "valid", nil
-	}
-	row.Error = "Mã link cũ không được tạo thêm đơn Hoàn Xu"
+	row.Error = "Chỉ hỗ trợ báo cáo Shopee có đủ năm phần tracking v4"
 	return "ignored", nil
 }

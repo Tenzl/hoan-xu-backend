@@ -209,7 +209,7 @@ func (s *Service) applyOne(ctx context.Context, batch string) (bool, error) {
 		var internalRejection bool
 		e = tx.QueryRow(ctx, `SELECT id::text,status,commission,value,share_bps,cashback_mode,coalesce(tracking_code,''),internally_rejected FROM orders WHERE channel=$1 AND publisher=$2 AND external_id=$3 AND line_id=$4 FOR UPDATE`, row.Channel, row.Publisher, row.OrderID, row.LineID).Scan(&appliedOrderID, &oldStatus, &oldCommission, &oldValue, &oldBps, &mode, &trackingCode, &internalRejection)
 		if e == nil {
-			if trackingCode != "" && trackingCode != row.Tracking {
+			if (trackingCode != "" && trackingCode != row.Tracking) || (row.NativeShopee && (mode != "signed_link" || oldBps != a.EffectiveBps)) {
 				status = "ignored"
 				row.Error = "Tracking không khớp đơn đã nhập"
 			} else {

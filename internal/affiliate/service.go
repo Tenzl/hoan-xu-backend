@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/singleflight"
 	"hoanxu/internal/browser"
 	"hoanxu/internal/cashback"
@@ -17,19 +18,19 @@ import (
 	"time"
 )
 
+type CustomLinkGenerator interface {
+	CreateCustomLinks(context.Context, []browser.CustomLinkParam) ([]browser.CustomLinkResult, error)
+}
+
 type cacheEntry struct {
 	at   time.Time
 	data json.RawMessage
 }
 
-type OfferLinkGenerator interface {
-	CreateOfferLink(context.Context, string, string, [5]string) (string, error)
-}
-
 type Service struct {
 	Store         *platform.Store
 	Browser       *browser.Manager
-	LinkGenerator OfferLinkGenerator                         // Defaults to Browser.
+	LinkGenerator CustomLinkGenerator                        // Defaults to Browser.
 	ProductLookup func(context.Context, string) (any, error) // Defaults to the verified product checker.
 	Lifetime      context.Context
 
@@ -177,13 +178,51 @@ func (s *Service) createLink(ctx context.Context, user, raw string, complete fun
 		return nil, e
 	}
 	defer unlock()
+	prepared, e := s.prepareLink(ctx, user, shop, item, canonical, conn, complete)
+	if e != nil {
+		return nil, e
+	}
+	if prepared.existing != nil {
+		return prepared.existing, nil
+	}
+	generator := s.LinkGenerator
+	if generator == nil {
+		if s.Browser == nil {
+			return nil, platform.Fail(503, "BROWSER_UNAVAILABLE", "Chrome Shopee chưa sẵn sàng.")
+		}
+		generator = s.Browser
+	}
+	linkCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
+	defer cancel()
+	links, e := generator.CreateCustomLinks(linkCtx, []browser.CustomLinkParam{prepared.param})
+	if e != nil {
+		return nil, checkError(e)
+	}
+	if len(links) != 1 || links[0].URL == "" && links[0].Err == nil {
+		return nil, checkError(errors.New("SHOPEE_RESPONSE_INVALID"))
+	}
+	if links[0].Err != nil {
+		return nil, checkError(links[0].Err)
+	}
+	return prepared.save(ctx, links[0].URL)
+}
+
+type preparedLink struct {
+	param    browser.CustomLinkParam
+	existing any
+	save     func(context.Context, string) (any, error)
+}
+
+// Prepare the snapshot before generation. The caller holds the product lock
+// until its single verified result has been saved.
+func (s *Service) prepareLink(ctx context.Context, user, shop, item, canonical string, conn *pgxpool.Conn, complete func(pgx.Tx, string, any) error) (*preparedLink, error) {
 	tx, e := conn.Begin(ctx)
 	if e != nil {
 		return nil, e
 	}
 	defer tx.Rollback(ctx)
-	var customerTracking string
-	if e = tx.QueryRow(ctx, `SELECT tracking_code FROM users WHERE id=$1 AND role='customer' AND NOT blocked`, user).Scan(&customerTracking); e != nil {
+	var validCustomer bool
+	if e = tx.QueryRow(ctx, `SELECT true FROM users WHERE id=$1 AND role='customer' AND NOT blocked`, user).Scan(&validCustomer); e != nil {
 		return nil, e
 	}
 	var existing []byte
@@ -224,10 +263,13 @@ func (s *Service) createLink(ctx context.Context, user, raw string, complete fun
 				return nil, e
 			}
 		}
-		return result, tx.Commit(ctx)
+		return &preparedLink{existing: result}, tx.Commit(ctx)
 	}
 	if e != pgx.ErrNoRows {
 		return nil, e
+	}
+	if err := s.Store.Tracking.Ready(); err != nil {
+		return nil, platform.TrackingError(err)
 	}
 	if !s.CheckEnabled() || !s.TrackingVerified {
 		return nil, platform.Fail(503, "TRACKING_NOT_VERIFIED", "Chưa xác minh tracking Shopee; chưa tạo link hoàn tiền thật.")
@@ -293,7 +335,6 @@ func (s *Service) createLink(ctx context.Context, user, raw string, complete fun
 	if e != nil {
 		return nil, platform.Fail(422, "INVALID_CASHBACK_POLICY", "Khoảng tỷ lệ cần là số nguyên và chênh lệch ít nhất 5 điểm phần trăm.")
 	}
-	bps := rate.MainBps
 	shopID, e := strconv.ParseUint(shop, 10, 64)
 	if e != nil {
 		return nil, e
@@ -303,45 +344,38 @@ func (s *Service) createLink(ctx context.Context, user, raw string, complete fun
 		return nil, e
 	}
 	created := time.Now().UTC().Truncate(time.Second)
-	claims := tracking.Claims{CreatedAt: created, Shop: shopID, Item: itemID, Policy: version, Tier: m.Code, Bps: bps}
-	ids, e := tracking.Issue(claims, customerTracking, conf.Publisher, rate.Factor(), s.Store.SignTracking)
+	claims := tracking.Claims{Customer: user, Publisher: conf.Publisher, CreatedAt: created, Shop: shopID, Item: itemID, Policy: version, EffectiveBps: rate.EffectiveBps}
+	ids, e := s.Store.Tracking.Issue(claims)
 	if e != nil {
 		return nil, e
 	}
-	generator := s.LinkGenerator
-	if generator == nil {
-		if s.Browser == nil {
-			return nil, platform.Fail(503, "BROWSER_UNAVAILABLE", "Chrome Shopee chưa sẵn sàng.")
-		}
-		generator = s.Browser
-	}
-	linkCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
-	defer cancel()
-	shortURL, e := generator.CreateOfferLink(linkCtx, shop, item, ids)
-	if e != nil {
-		return nil, checkError(e)
-	}
-	subIDs, e := json.Marshal(ids)
+	trackingCode, e := tracking.Code(ids)
 	if e != nil {
 		return nil, e
 	}
-	var id string
-	save, e := conn.Begin(ctx)
-	if e != nil {
-		return nil, e
-	}
-	defer save.Rollback(ctx)
-	e = save.QueryRow(ctx, `INSERT INTO affiliate_links(user_id,channel,original_url,affiliate_url,tracking_code,policy_id,item_id,created_at,tier_code,min_share_bps,max_share_bps,tracking_sub_ids,expires_at,payout_factor,effective_share_bps,lifecycle_status,product_name) VALUES($1,'shopee',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'active',$15) RETURNING id::text`, user, canonical, shortURL, ids[2], m.PolicyID, item, created, m.Code, int(m.Public().Min), int(m.Public().Max), subIDs, claims.ExpiresAt(), rate.Factor(), rate.EffectiveBps, product.Name).Scan(&id)
-	if e != nil {
-		return nil, e
-	}
-	result := map[string]any{"id": id, "status": "active", "canDelete": true, "reused": false, "legacy": false, "affiliateUrl": shortURL, "trackingCode": ids[2], "channel": "shopee", "policyId": m.PolicyID, "tierCode": m.Code, "tierNameVi": m.NameVI, "tierNameEn": m.NameEN, "minSharePercent": m.Public().Min, "maxSharePercent": m.Public().Max, "effectiveSharePercent": cashback.Percent(rate.EffectiveBps), "payoutFactor": rate.Factor(), "createdAt": created, "expiresAt": claims.ExpiresAt()}
-	result["productName"] = product.Name
-	result["autoDeleteAt"] = created.Add(Retention)
-	if complete != nil {
-		if e = complete(save, id, result); e != nil {
+	return &preparedLink{param: browser.CustomLinkParam{Shop: shop, Item: item, SubIDs: ids}, save: func(ctx context.Context, shortURL string) (any, error) {
+		subIDs, e := json.Marshal(ids)
+		if e != nil {
 			return nil, e
 		}
-	}
-	return result, save.Commit(ctx)
+		var id string
+		save, e := conn.Begin(ctx)
+		if e != nil {
+			return nil, e
+		}
+		defer save.Rollback(ctx)
+		e = save.QueryRow(ctx, `INSERT INTO affiliate_links(user_id,channel,original_url,affiliate_url,tracking_code,policy_id,item_id,created_at,tier_code,min_share_bps,max_share_bps,tracking_sub_ids,expires_at,payout_factor,effective_share_bps,lifecycle_status,product_name) VALUES($1,'shopee',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'active',$15) RETURNING id::text`, user, canonical, shortURL, trackingCode, m.PolicyID, item, created, m.Code, int(m.Public().Min), int(m.Public().Max), subIDs, claims.ExpiresAt(), rate.Factor(), rate.EffectiveBps, product.Name).Scan(&id)
+		if e != nil {
+			return nil, e
+		}
+		result := map[string]any{"id": id, "status": "active", "canDelete": true, "reused": false, "affiliateUrl": shortURL, "trackingCode": trackingCode, "channel": "shopee", "policyId": m.PolicyID, "tierCode": m.Code, "tierNameVi": m.NameVI, "tierNameEn": m.NameEN, "minSharePercent": m.Public().Min, "maxSharePercent": m.Public().Max, "effectiveSharePercent": cashback.Percent(rate.EffectiveBps), "payoutFactor": rate.Factor(), "createdAt": created, "expiresAt": claims.ExpiresAt()}
+		result["productName"] = product.Name
+		result["autoDeleteAt"] = created.Add(Retention)
+		if complete != nil {
+			if e = complete(save, id, result); e != nil {
+				return nil, e
+			}
+		}
+		return result, save.Commit(ctx)
+	}}, nil
 }

@@ -8,9 +8,9 @@ import (
 )
 
 // Saved-link state is independent of order status.
-const LinkJSON = `jsonb_build_object('productName',coalesce(nullif(l.product_name,''),(SELECT product_name FROM orders n WHERE n.user_id=l.user_id AND (n.link_id=l.id OR n.tracking_code=l.tracking_code) ORDER BY n.ordered_at DESC,n.id DESC LIMIT 1)),'id',l.id,'channel',l.channel,'originalUrl',l.original_url,'affiliateUrl',l.affiliate_url,'trackingCode',l.tracking_code,'createdAt',l.created_at,'expiresAt',l.expires_at,'autoDeleteAt',CASE WHEN l.tracking_sub_ids IS NULL THEN NULL ELSE l.created_at+interval '120 hours' END,'policyId',l.policy_id,'tierCode',l.tier_code,'tierNameVi',(SELECT name_vi FROM cashback_tiers WHERE policy_id=l.policy_id AND tier_code=l.tier_code),'tierNameEn',(SELECT name_en FROM cashback_tiers WHERE policy_id=l.policy_id AND tier_code=l.tier_code),'minSharePercent',l.min_share_bps::numeric/100,'maxSharePercent',l.max_share_bps::numeric/100,'effectiveSharePercent',l.effective_share_bps::numeric/100,'payoutFactor',l.payout_factor::text,'legacy',l.tracking_sub_ids IS NULL,'status',CASE WHEN l.tracking_sub_ids IS NULL THEN 'legacy' ELSE 'active' END,'canDelete',l.tracking_sub_ids IS NOT NULL AND l.deleted_at IS NULL)`
+const LinkJSON = `jsonb_build_object('productName',coalesce(nullif(l.product_name,''),(SELECT product_name FROM orders n WHERE n.user_id=l.user_id AND (n.link_id=l.id OR n.tracking_code=l.tracking_code) ORDER BY n.ordered_at DESC,n.id DESC LIMIT 1)),'id',l.id,'channel',l.channel,'originalUrl',l.original_url,'affiliateUrl',l.affiliate_url,'trackingCode',l.tracking_code,'createdAt',l.created_at,'expiresAt',l.expires_at,'autoDeleteAt',l.created_at+interval '120 hours','policyId',l.policy_id,'tierCode',l.tier_code,'tierNameVi',(SELECT name_vi FROM cashback_tiers WHERE policy_id=l.policy_id AND tier_code=l.tier_code),'tierNameEn',(SELECT name_en FROM cashback_tiers WHERE policy_id=l.policy_id AND tier_code=l.tier_code),'minSharePercent',l.min_share_bps::numeric/100,'maxSharePercent',l.max_share_bps::numeric/100,'effectiveSharePercent',l.effective_share_bps::numeric/100,'payoutFactor',l.payout_factor::text,'status','active','canDelete',l.tracking_sub_ids IS NOT NULL AND l.tracking_sub_ids->>0 LIKE 'HX41%' AND l.deleted_at IS NULL)`
 const LinkFromSQL = `FROM affiliate_links l`
-const VisibleLinksSQL = `l.deleted_at IS NULL AND (l.tracking_sub_ids IS NULL OR l.created_at>now()-interval '120 hours')`
+const VisibleLinksSQL = `l.tracking_sub_ids IS NOT NULL AND l.tracking_sub_ids->>0 LIKE 'HX41%' AND l.deleted_at IS NULL AND l.created_at>now()-interval '120 hours'`
 const Retention = 5 * 24 * time.Hour
 
 const LinksSQL = "SELECT " + LinkJSON + " " + LinkFromSQL
@@ -46,8 +46,8 @@ func (s *Service) deleteLink(ctx context.Context, user, id string, cutoff *time.
 	}
 	defer tx.Rollback(ctx)
 	var code string
-	var legacy, due bool
-	err = tx.QueryRow(ctx, `SELECT tracking_code,tracking_sub_ids IS NULL,($3::timestamptz IS NULL OR deleted_at IS NOT NULL OR created_at<=$3) FROM affiliate_links WHERE id=$1 AND user_id=$2`, id, user, cutoff).Scan(&code, &legacy, &due)
+	var due bool
+	err = tx.QueryRow(ctx, `SELECT tracking_code,($3::timestamptz IS NULL OR deleted_at IS NOT NULL OR created_at<=$3) FROM affiliate_links WHERE id=$1 AND user_id=$2 AND tracking_sub_ids IS NOT NULL`, id, user, cutoff).Scan(&code, &due)
 	if err == pgx.ErrNoRows {
 		if cutoff != nil {
 			return false, nil
@@ -56,9 +56,6 @@ func (s *Service) deleteLink(ctx context.Context, user, id string, cutoff *time.
 	}
 	if err != nil {
 		return false, err
-	}
-	if legacy {
-		return false, platform.Fail(403, "LEGACY_LINK_READ_ONLY", "Link lịch sử — chỉ đọc")
 	}
 	if !due {
 		return false, nil

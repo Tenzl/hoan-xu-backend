@@ -645,7 +645,7 @@ func (s *Server) manualOrder(w http.ResponseWriter, r *http.Request) {
 		if e != nil {
 			return nil, platform.Conflict(e)
 		}
-		e = platform.Audit(r.Context(), tx, user(r).ID, "manual_order", id, p)
+		e = platform.Audit(r.Context(), tx, user(r).ID, "manual_order", id, map[string]any{"trackingCode": row.Tracking, "channel": row.Channel, "publisher": row.Publisher, "externalId": row.OrderID, "lineId": row.LineID, "value": row.Value, "commission": row.Commission, "evidence": p.Evidence})
 		return map[string]any{"id": id, "cashback": cash}, e
 	})
 	s.reply(w, r, 201, v, e)

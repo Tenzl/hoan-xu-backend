@@ -95,7 +95,9 @@ func TestGoldTotalsLifecycle(t *testing.T) {
 	must(e)
 	goldTotals(t, s, u, 100000, 60000)
 	_, e = osvc.Event(ctx, admin, oid, "gold-adjustment", orders.Event{Action: "adjustment", Reason: "Adjust amount"})
-	if e==nil {t.Fatal("approved correction accepted")}
+	if e == nil {
+		t.Fatal("approved correction accepted")
+	}
 	goldTotals(t, s, u, 100000, 60000)
 	// Rejected corrections cannot change totals or create debt.
 	var debt int64

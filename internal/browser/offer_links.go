@@ -3,10 +3,9 @@ package browser
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"log/slog"
 	"net/url"
 	"regexp"
+	"strconv"
 	"sync"
 	"time"
 
@@ -14,54 +13,80 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-type offerLinkRequest struct {
+// CustomLinkParam carries all five encrypted tracking parts for one product.
+type CustomLinkParam struct {
 	Shop, Item string
 	SubIDs     [5]string
 }
+type CustomLinkResult struct {
+	URL string
+	Err error
+}
+type offerLinkRequest struct{ Params []CustomLinkParam }
 
 var offerID = regexp.MustCompile(`^[0-9]+$`)
 var shortOfferPath = regexp.MustCompile(`^/[A-Za-z0-9]+$`)
 
-// subId1 is permanent per customer; subId2 labels HoanXu; subId3 identifies the link.
-func (m *Manager) CreateOfferLink(ctx context.Context, shop, item string, ids [5]string) (string, error) {
-	if !offerID.MatchString(shop) || !offerID.MatchString(item) {
-		return "", failure("SHOPEE_RESPONSE_INVALID", "offer_link_input", false)
+func (m *Manager) CreateCustomLinks(ctx context.Context, params []CustomLinkParam) ([]CustomLinkResult, error) {
+	if len(params) != 1 {
+		return nil, failure("SHOPEE_RESPONSE_INVALID", "offer_link_input", false)
 	}
-	for _, id := range ids {
-		if id == "" || len(id) > 50 {
-			return "", failure("SHOPEE_RESPONSE_INVALID", "offer_link_input", false)
+	for _, p := range params {
+		if !offerID.MatchString(p.Shop) || !offerID.MatchString(p.Item) {
+			return nil, failure("SHOPEE_RESPONSE_INVALID", "offer_link_input", false)
+		}
+		for _, id := range p.SubIDs {
+			if id == "" || len(id) > 50 {
+				return nil, failure("SHOPEE_RESPONSE_INVALID", "offer_link_input", false)
+			}
 		}
 	}
-	body, err := m.submit(ctx, item, &offerLinkRequest{Shop: shop, Item: item, SubIDs: ids})
+	body, err := m.submit(ctx, params[0].Item, &offerLinkRequest{Params: params})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return parseOfferLinkResponse(body, shop, item)
+	return parseCustomLinkResponse(body, len(params))
 }
 
+type customLinkPayload struct {
+	OriginalLink string            `json:"originalLink"`
+	Advanced     map[string]string `json:"advancedLinkParams"`
+}
+
+func customLinkPayloads(link offerLinkRequest) []customLinkPayload {
+	params := make([]customLinkPayload, len(link.Params))
+	for i, p := range link.Params {
+		ids := make(map[string]string, 5)
+		for j, id := range p.SubIDs {
+			ids["subId"+strconv.Itoa(j+1)] = id
+		}
+		params[i] = customLinkPayload{OriginalLink: "https://shopee.vn/product/" + p.Shop + "/" + p.Item, Advanced: ids}
+	}
+	return params
+}
 func matchesOfferLinkRequest(raw string, link offerLinkRequest) bool {
 	var request struct {
 		Operation string `json:"operationName"`
 		Variables struct {
-			Source   string `json:"sourceCaller"`
-			Products []struct {
-				Item string      `json:"itemId"`
-				Shop json.Number `json:"shopId"`
-			} `json:"productOfferLinkParams"`
-			SubIDs struct {
-				Customer string `json:"subId1"`
-				Campaign string `json:"subId2"`
-				Link     string `json:"subId3"`
-				Four     string `json:"subId4"`
-				Five     string `json:"subId5"`
-			} `json:"advancedLinkParams"`
+			Source string              `json:"sourceCaller"`
+			Links  []customLinkPayload `json:"linkParams"`
 		} `json:"variables"`
 	}
-	if len(raw) > maxProductBody || json.Unmarshal([]byte(raw), &request) != nil || request.Operation != "batchGetProductOfferLink" || request.Variables.Source != "WEB_SITE_CALLER" || len(request.Variables.Products) != 1 {
+	if len(link.Params) != 1 || len(raw) > maxProductBody || json.Unmarshal([]byte(raw), &request) != nil || request.Operation != "batchGetCustomLink" || request.Variables.Source != "CUSTOM_LINK_CALLER" || len(request.Variables.Links) != len(link.Params) {
 		return false
 	}
-	p, ids := request.Variables.Products[0], request.Variables.SubIDs
-	return p.Item == link.Item && p.Shop.String() == link.Shop && [5]string{ids.Customer, ids.Campaign, ids.Link, ids.Four, ids.Five} == link.SubIDs
+	for i, expected := range customLinkPayloads(link) {
+		actual := request.Variables.Links[i]
+		if actual.OriginalLink != expected.OriginalLink || len(actual.Advanced) != 5 {
+			return false
+		}
+		for key, value := range expected.Advanced {
+			if actual.Advanced[key] != value {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // Let the Affiliate app build and authenticate its own GraphQL request. A bare
@@ -89,7 +114,7 @@ func (m *Manager) fetchOfferLink(ctx context.Context, link offerLinkRequest) ([]
 		switch e := event.(type) {
 		case *network.EventRequestWillBeSent:
 			u, err := url.Parse(e.Request.URL)
-			if err == nil && u.Host == m.responseHost && u.Path == "/api/v3/gql" && u.Query().Get("q") == "productOfferLinks" && e.Request.Method == "POST" && e.DocumentURL == m.offerBaseURL+link.Item {
+			if err == nil && u.Host == m.responseHost && u.Path == "/api/v3/gql" && u.Query().Get("q") == "batchCustomLink" && e.Request.Method == "POST" && e.DocumentURL == m.offerBaseURL+link.Params[0].Item {
 				requests[e.RequestID] = response{}
 			}
 		case *network.EventResponseReceived:
@@ -124,67 +149,57 @@ func (m *Manager) fetchOfferLink(ctx context.Context, link offerLinkRequest) ([]
 		}
 	})
 	var err error
-	values, _ := json.Marshal(link.SubIDs)
-	fillSubIDs := chromedp.Tasks{
-		chromedp.WaitReady("#getLinkModal_sub_id1", chromedp.ByQuery),
-		chromedp.Evaluate(`(() => {
-  const values = `+string(values)+`;
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-  values.forEach((value, index) => {
-    const input = document.querySelector('#getLinkModal_sub_id'+(index+1));
-    setter.call(input, value);
-    input.dispatchEvent(new Event('input', {bubbles:true}));
-    input.dispatchEvent(new Event('change', {bubbles:true}));
-  });
-})()`, nil),
+	values, _ := json.Marshal(customLinkPayloads(link))
+	// Use the current app's exported GraphQL function so its client supplies fresh
+	// CSRF/SAP headers. Discover by operation text instead of versioned module IDs.
+	// The native function reads advancedLinkParams once per mapped URL; a getter
+	// supplies that URL's signed IDs. Verify the actual outbound payload below.
+	script := `(() => {
+  const chunks = self.webpackChunkaffiliate_network;
+  if (!chunks) return false;
+  let require;
+  chunks.push([["hoanxu_custom_link_"+crypto.randomUUID()], {}, r => { require = r; }]);
+  if (!require || !require.m) return false;
+  for (const [id, factory] of Object.entries(require.m)) {
+   if (!factory.toString().includes('batchGetCustomLink')) continue;
+   const exports = require(id);
+   const send = Object.values(exports).find(fn => typeof fn === 'function' && fn.toString().includes('batchGetCustomLink'));
+   if (!send) continue;
+   const params = ` + string(values) + `;
+   let index = 0;
+   window.__hoanxuCustomLinkFailed = false;
+   try {
+    Promise.resolve(send({links:params.map(p => p.originalLink), get advancedLinkParams() { return params[index++].advancedLinkParams; }})).catch(() => { window.__hoanxuCustomLinkFailed = true; });
+   } catch { window.__hoanxuCustomLinkFailed = true; }
+   return true;
+  }
+  return false;
+ })()`
+	var sent bool
+	if err = boundedCommand(scope, 5*time.Second, chromedp.Evaluate(script, &sent)); err != nil || !sent {
+		return nil, failure("SHOPEE_RESPONSE_INVALID", "custom_link_client", false)
 	}
-	for _, step := range []struct {
-		phase  string
-		action chromedp.Action
-	}{
-		{"offer_link_ready", chromedp.WaitEnabled(".get-link-btn", chromedp.ByQuery)},
-		{"offer_link_open", chromedp.Evaluate(`document.querySelector('.get-link-btn').click()`, nil)},
-		{"offer_link_advanced", chromedp.Tasks{chromedp.WaitReady(`.ant-modal-body input[type="radio"][value="1"]`, chromedp.ByQuery), chromedp.Evaluate(`document.querySelector('.ant-modal-body input[type="radio"][value="1"]').click()`, nil)}},
-		{"offer_link_subids", fillSubIDs},
-		{"offer_link_submit", chromedp.Evaluate(`document.querySelector('.ant-modal-body .add-subid-btn button').click()`, nil)},
-		{"offer_link_validation", chromedp.ActionFunc(func(c context.Context) error {
-			var rejected bool
-			err := chromedp.Run(c, chromedp.Evaluate(`document.querySelector('.ant-modal-body .ant-form-item-has-error input[id^="getLinkModal_sub_id"]') !== null`, &rejected))
-			if err != nil {
-				return err
-			}
-			if rejected {
-				return failure("SHOPEE_SUBID_REJECTED", "offer_link_validation", false)
-			}
-			return nil
-		})},
-	} {
-		started := time.Now()
-		if err = boundedCommand(scope, 5*time.Second, step.action); err != nil {
-			var f *Failure
-			if errors.As(err, &f) {
-				return nil, f
-			}
-			return nil, failure("SHOPEE_TIMEOUT", step.phase, false)
-		}
-		slog.Debug("shopee_offer_link_step", "phase", step.phase, "duration_ms", time.Since(started).Milliseconds())
-	}
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-scope.Done():
 			return nil, failure("SHOPEE_TIMEOUT", "offer_link", false)
 		case f := <-failures:
 			return nil, f
+		case <-ticker.C:
+			var failed bool
+			if err := boundedCommand(scope, time.Second, chromedp.Evaluate(`window.__hoanxuCustomLinkFailed === true`, &failed)); err != nil || failed {
+				return nil, failure("SHOPEE_UPSTREAM_FAILED", "custom_link_client", false)
+			}
 		case id := <-completed:
 			var post string
 			err = boundedCommand(scope, 3*time.Second, chromedp.ActionFunc(func(c context.Context) error { var e error; post, e = network.GetRequestPostData(id).Do(c); return e }))
 			if err != nil {
 				return nil, failure("SHOPEE_RESPONSE_INVALID", "offer_link_request", false)
 			}
-			// Ignore the modal's automatic standard link and any response carrying
-			// different product/customer/link IDs; never save its unattributed URL.
+			// Only accept the response for this product and its exact tracking.
 			if !matchesOfferLinkRequest(post, link) {
-
 				continue
 			}
 			mu.Lock()
@@ -201,7 +216,7 @@ func (m *Manager) fetchOfferLink(ctx context.Context, link offerLinkRequest) ([]
 				if err != nil {
 					return nil, failure("SHOPEE_RESPONSE_INVALID", "offer_link_body", false)
 				}
-				if _, err = parseOfferLinkResponse(body, link.Shop, link.Item); err != nil {
+				if _, err = parseCustomLinkResponse(body, len(link.Params)); err != nil {
 					return nil, err
 				}
 				return body, nil
@@ -212,26 +227,39 @@ func (m *Manager) fetchOfferLink(ctx context.Context, link offerLinkRequest) ([]
 	}
 }
 
-func parseOfferLinkResponse(body []byte, shop, item string) (string, error) {
+func parseCustomLinkResponse(body []byte, count int) ([]CustomLinkResult, error) {
 	var response struct {
 		Code   int               `json:"code"`
+		Error  int               `json:"error"`
 		Errors []json.RawMessage `json:"errors"`
 		Data   struct {
 			Links []struct {
-				Item string `json:"itemId"`
-				Shop string `json:"shopId"`
-				URL  string `json:"productOfferLink"`
-			} `json:"productOfferLinks"`
+				Short string `json:"shortLink"`
+				Long  string `json:"longLink"`
+				Fail  *int   `json:"failCode"`
+			} `json:"batchCustomLink"`
 		} `json:"data"`
 	}
 	bad := failure("SHOPEE_RESPONSE_INVALID", "offer_link_schema", false)
-	if len(body) > maxProductBody || json.Unmarshal(body, &response) != nil || response.Code != 0 || len(response.Errors) != 0 || len(response.Data.Links) != 1 {
-		return "", bad
+	if count < 1 || count > 5 || len(body) > maxProductBody || json.Unmarshal(body, &response) != nil || response.Code != 0 || response.Error != 0 || len(response.Errors) != 0 || len(response.Data.Links) != count {
+		return nil, bad
 	}
-	l := response.Data.Links[0]
-	u, err := url.Parse(l.URL)
-	if err != nil || l.Item != item || l.Shop != shop || u.Scheme != "https" || u.Host != "s.shopee.vn" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || !shortOfferPath.MatchString(u.Path) || u.Path == "/an_redir" || len(l.URL) > 2048 {
-		return "", bad
+	results := make([]CustomLinkResult, count)
+	for i, link := range response.Data.Links {
+		if link.Fail != nil && *link.Fail != 0 {
+			code := "SHOPEE_UPSTREAM_FAILED"
+			if *link.Fail >= 3 && *link.Fail <= 7 {
+				code = "SHOPEE_SUBID_REJECTED"
+			}
+			results[i].Err = failure(code, "custom_link_rejected", false)
+			continue
+		}
+		u, err := url.Parse(link.Short)
+		if err != nil || u.Scheme != "https" || u.Host != "s.shopee.vn" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || !shortOfferPath.MatchString(u.Path) || u.Path == "/an_redir" || len(link.Short) > 2048 {
+			results[i].Err = bad
+			continue
+		}
+		results[i].URL = link.Short
 	}
-	return l.URL, nil
+	return results, nil
 }

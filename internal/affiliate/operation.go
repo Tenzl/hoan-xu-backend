@@ -27,7 +27,7 @@ func (s *Service) CreateLinkOperation(ctx context.Context, user, key, raw string
 		var code, message *string
 		var httpStatus *int
 		var deleted bool
-		err = s.Store.Pool.QueryRow(ctx, `SELECT op.payload_hash,op.status,op.response||jsonb_build_object('canDelete',l.tracking_sub_ids IS NOT NULL AND l.deleted_at IS NULL,'status',CASE WHEN l.tracking_sub_ids IS NULL THEN 'legacy' ELSE 'active' END,'autoDeleteAt',l.created_at+interval '120 hours'),op.link_id::text,op.error_status,op.error_code,op.error_message,(l.id IS NULL OR l.deleted_at IS NOT NULL OR l.created_at<=now()-interval '120 hours') FROM link_operations op LEFT JOIN affiliate_links l ON l.id=op.link_id AND l.user_id=op.user_id WHERE op.user_id=$1 AND op.key=$2`, user, key).Scan(&existing, &status, &response, &link, &httpStatus, &code, &message, &deleted)
+		err = s.Store.Pool.QueryRow(ctx, `SELECT op.payload_hash,op.status,op.response||jsonb_build_object('canDelete',l.tracking_sub_ids IS NOT NULL AND l.deleted_at IS NULL,'status','active','autoDeleteAt',l.created_at+interval '120 hours'),op.link_id::text,op.error_status,op.error_code,op.error_message,(l.id IS NULL OR l.tracking_sub_ids IS NULL OR coalesce(l.tracking_sub_ids->>0,'') NOT LIKE 'HX41%' OR l.deleted_at IS NOT NULL OR l.created_at<=now()-interval '120 hours') FROM link_operations op LEFT JOIN affiliate_links l ON l.id=op.link_id AND l.user_id=op.user_id WHERE op.user_id=$1 AND op.key=$2`, user, key).Scan(&existing, &status, &response, &link, &httpStatus, &code, &message, &deleted)
 		if err != nil {
 			return nil, err
 		}

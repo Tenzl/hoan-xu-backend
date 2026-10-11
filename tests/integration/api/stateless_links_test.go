@@ -61,8 +61,8 @@ func TestSignedCSVExpiryLateImportSnapshotDuplicateAndCancellation(t *testing.T)
 		t.Fatal(e)
 	}
 	created := time.Now().UTC().Add(-30 * 24 * time.Hour).Truncate(time.Second)
-	claims := tracking.Claims{CreatedAt: created, Shop: 83496725, Item: 6939920023, Policy: version, Tier: "bronze", Bps: 6600}
-	ids, e := tracking.Issue(claims, code, "123456789", "0.63", s.SignTracking)
+	claims := tracking.Claims{CreatedAt: created, Shop: 83496725, Item: 6939920023, Policy: version}
+	ids, e := fixtureTracking(t, s, claims, customer)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -70,7 +70,7 @@ func TestSignedCSVExpiryLateImportSnapshotDuplicateAndCancellation(t *testing.T)
 	if e = (&affiliate.Service{Store: s}).SavePublisher(ctx, admin, "987654321"); e != nil {
 		t.Fatal(e)
 	}
-	base := imports.Row{NativeShopee: true, Channel: "shopee", OrderID: "ORDER1", LineID: "line-one", Tracking: ids[2], SubIDs: ids, ShopID: "83496725", ItemID: "6939920023", Name: "Product", Value: 100000, Commission: 5001, Status: "pending", Date: created.Add(time.Hour)}
+	base := imports.Row{NativeShopee: true, Channel: "shopee", OrderID: "ORDER1", LineID: "line-one", Tracking: fixtureCode(ids), SubIDs: ids, ShopID: "83496725", ItemID: "6939920023", Name: "Product", Value: 100000, Commission: 5001, Status: "pending", Date: created.Add(time.Hour)}
 	rows := []imports.Row{base, base}
 	rejected := base
 	rejected.LineID = "cancelled"
@@ -98,7 +98,7 @@ func TestSignedCSVExpiryLateImportSnapshotDuplicateAndCancellation(t *testing.T)
 		case 5:
 			bad.SubIDs[3] = "0p99"
 		case 6:
-			bad.SubIDs[2] = bad.SubIDs[2][:48] + "z"
+			bad.SubIDs[2] = bad.SubIDs[2][:len(bad.SubIDs[2])-1] + "!"
 		case 7:
 			bad.SubIDs[1] = "other-campaign"
 		}

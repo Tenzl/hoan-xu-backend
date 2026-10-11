@@ -30,18 +30,18 @@ func savedFixture(t *testing.T, s *platform.Store, user string, created time.Tim
 	if e := s.Pool.QueryRow(ctx, `SELECT id::text,tracking_version FROM cashback_policies WHERE mode='tiered' AND EXISTS(SELECT 1 FROM cashback_tiers t WHERE t.policy_id=cashback_policies.id AND t.tier_code='bronze') ORDER BY created_at DESC,id DESC LIMIT 1`).Scan(&policy, &version); e != nil {
 		t.Fatal(e)
 	}
-	claims := tracking.Claims{CreatedAt: created, Shop: 83496725, Item: 6939920023, Policy: version, Tier: "bronze", Bps: 6600}
-	ids, e := tracking.Issue(claims, customer, "123456789", "0.63", s.SignTracking)
+	claims := tracking.Claims{CreatedAt: created, Shop: 83496725, Item: 6939920023, Policy: version}
+	ids, e := fixtureTracking(t, s, claims, user)
 	if e != nil {
 		t.Fatal(e)
 	}
 	raw, _ := json.Marshal(ids)
 	var id string
-	e = s.Pool.QueryRow(ctx, `INSERT INTO affiliate_links(user_id,channel,original_url,affiliate_url,tracking_code,policy_id,item_id,created_at,tier_code,min_share_bps,max_share_bps,tracking_sub_ids,expires_at,payout_factor,effective_share_bps,lifecycle_status) VALUES($1,'shopee','https://shopee.vn/product/83496725/6939920023','https://s.shopee.vn/Test',$2,$3,'6939920023',$4,'bronze',6500,7500,$5,$6,0.63,6300,'active') RETURNING id::text`, user, ids[2], policy, created, raw, claims.ExpiresAt()).Scan(&id)
+	e = s.Pool.QueryRow(ctx, `INSERT INTO affiliate_links(user_id,channel,original_url,affiliate_url,tracking_code,policy_id,item_id,created_at,tier_code,min_share_bps,max_share_bps,tracking_sub_ids,expires_at,payout_factor,effective_share_bps,lifecycle_status) VALUES($1,'shopee','https://shopee.vn/product/83496725/6939920023','https://s.shopee.vn/Test',$2,$3,'6939920023',$4,'bronze',6500,7500,$5,$6,0.63,6300,'active') RETURNING id::text`, user, fixtureCode(ids), policy, created, raw, claims.ExpiresAt()).Scan(&id)
 	if e != nil {
 		t.Fatal(e)
 	}
-	row := imports.Row{NativeShopee: true, Channel: "shopee", Publisher: "123456789", OrderID: "ORDER1", ConversionID: "123", ShopID: "83496725", ItemID: "6939920023", ModelID: "456", PromotionID: "0", Tracking: ids[2], SubIDs: ids, Name: "Product", Value: 100000, Commission: 10001, Status: "pending", Date: created.Add(time.Hour)}
+	row := imports.Row{NativeShopee: true, Channel: "shopee", Publisher: "123456789", OrderID: "ORDER1", ConversionID: "123", ShopID: "83496725", ItemID: "6939920023", ModelID: "456", PromotionID: "0", Tracking: fixtureCode(ids), SubIDs: ids, Name: "Product", Value: 100000, Commission: 10001, Status: "pending", Date: created.Add(time.Hour)}
 	row.LineID, e = imports.SourceLineID(row)
 	if e != nil {
 		t.Fatal(e)
@@ -171,8 +171,8 @@ func TestDeleteLinkHTTPChecksOwnershipCSRFAndLegacy(t *testing.T) {
 	if _, e = s.Pool.Exec(ctx, `UPDATE affiliate_links SET tracking_sub_ids=NULL,expires_at=NULL,lifecycle_status=NULL WHERE id=$1`, legacy); e != nil {
 		t.Fatal(e)
 	}
-	if got := request(legacy, u.CSRF); got != 403 {
-		t.Fatal("legacy", got)
+	if got := request(legacy, u.CSRF); got != 404 {
+		t.Fatal("unsupported unsigned link must not be available", got)
 	}
 	var count int
 	if e := s.Pool.QueryRow(ctx, `SELECT count(*) FROM affiliate_links WHERE user_id=$1`, user).Scan(&count); e != nil || count != 1 {

@@ -1,4 +1,5 @@
 {
+  "Thiếu khóa tracking. Cần cấu hình lại khóa và xử lý lại báo cáo.": "Tracking key unavailable. Restore the key configuration and retry the report.",
   "Đang tải…": "Loading…",
   "Đang tải quyền lợi…": "Loading your benefits…",
   "Chưa tải được quyền lợi của bạn.": "Could not load your benefits.",
@@ -891,7 +892,6 @@
   "phút để được hoàn Xu": "minutes to qualify for Xu cashback",
   "Còn hạn": "Active",
   "Đã cancel": "Cancelled",
-  "Link lịch sử — chỉ đọc": "Historical link — read-only",
   "Link đã bị cancel — hết thời hạn hoàn Xu": "Link cancelled — cashback deadline passed",
   "Link đã bị cancel — đơn đã bị hủy hoặc từ chối": "Link cancelled — orders were cancelled or rejected",
   "Hạn mua mới đã hết; đơn đặt đúng hạn tiếp tục được đối soát.": "The deadline for new purchases has passed; timely orders continue to be reconciled.",
@@ -1632,5 +1632,17 @@
   "Cột Item Total Commission(₫) cần số VND không âm, tối đa 1.000.000.000.000": "Cột Item Total Commission(₫) must contain a nonnegative VND amount, up to 1,000,000,000,000",
   "Kênh tiếp thị": "Report channel",
   "Order Time trước thời điểm phát hành tracking": "Order Time is before tracking was issued",
-  "Tracking hoặc thời điểm phát hành không khớp đối soát.": "Tracking or issue-time metadata does not match reconciliation."
+  "Tracking hoặc thời điểm phát hành không khớp đối soát.": "Tracking or issue-time metadata does not match reconciliation.",
+  "Thêm tối đa 5 sản phẩm, lấy link hoàn tiền cùng lúc.": "Add up to 5 products and get cashback links together.",
+  "Danh sách sản phẩm": "Product list",
+  "Số link đã thêm": "Number of link rows",
+  "Thêm link sản phẩm": "Add product link",
+  "Thêm link": "Add link",
+  "Bỏ dòng link": "Remove link row",
+  "Đã đủ 5 link cho lần tạo này": "All 5 link rows are in use",
+  "Tối đa 5 link mỗi lần": "Up to 5 links at a time",
+  "Link hoàn tiền đã sẵn sàng": "Your cashback links are ready",
+  "Mỗi lần chỉ tạo từ 1 đến 5 link.": "Create between 1 and 5 links at a time.",
+  "Link sản phẩm không hợp lệ.": "The product link is invalid.",
+  "Sản phẩm này đã có trong danh sách.": "This product is already in the list."
 }

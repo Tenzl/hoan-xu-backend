@@ -111,11 +111,11 @@ func TestAllReadRoutesAndManualOrderAgainstPostgreSQL(t *testing.T) {
 		t.Fatal(e)
 	}
 	at := time.Now().UTC().Truncate(time.Second)
-	ids, e := tracking.Issue(tracking.Claims{CreatedAt: at, Shop: 1, Item: 2, Policy: version, Tier: "bronze", Bps: 6600}, code, "123456789", "0.63", store.SignTracking)
+	ids, e := fixtureTracking(t, store, tracking.Claims{CreatedAt: at, Shop: 1, Item: 2, Policy: version}, customer)
 	if e != nil {
 		t.Fatal(e)
 	}
-	raw, _ := json.Marshal(map[string]any{"trackingCode": ids[2], "channel": "shopee", "publisher": "123456789", "externalId": "MANUAL1", "lineId": "ignored", "productName": "Manual order", "value": 100000, "commission": 5000, "evidence": "Approved platform report", "subIds": ids, "shopId": "1", "itemId": "2", "conversionId": "12345", "modelId": "0", "promotionId": "0", "orderedAt": at.Add(time.Second)})
+	raw, _ := json.Marshal(map[string]any{"trackingCode": fixtureCode(ids), "channel": "shopee", "publisher": "123456789", "externalId": "MANUAL1", "lineId": "ignored", "productName": "Manual order", "value": 100000, "commission": 5000, "evidence": "Approved platform report", "subIds": ids, "shopId": "1", "itemId": "2", "conversionId": "12345", "modelId": "0", "promotionId": "0", "orderedAt": at.Add(time.Second)})
 	body := string(raw)
 	w := request("POST", "/admin/orders", body, adminToken, adminUser.CSRF)
 	if w.Code != 201 {

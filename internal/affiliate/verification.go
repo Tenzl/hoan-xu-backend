@@ -3,6 +3,8 @@ package affiliate
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"hoanxu/internal/browser"
 	"hoanxu/internal/platform"
 	"hoanxu/internal/shopeeconfig"
 	"hoanxu/internal/tracking"
@@ -13,12 +15,15 @@ import (
 type VerificationBrowser interface {
 	RefreshSession(context.Context) map[string]any
 	Check(context.Context, string) ([]byte, error)
-	CreateOfferLink(context.Context, string, string, [5]string) (string, error)
+	CustomLinkGenerator
 }
 
 // VerifyIntegration exercises the native browser and real GQL without creating
 // customer links, orders, or ledger entries. The diagnostic customer is reserved.
 func VerifyIntegration(ctx context.Context, s *platform.Store, b VerificationBrowser, cfg shopeeconfig.Config, raw string, stage func(string)) error {
+	if err := s.Tracking.Ready(); err != nil {
+		return platform.TrackingError(err)
+	}
 	stage("session")
 	if b == nil {
 		return platform.Fail(503, "BROWSER_UNAVAILABLE", "Chrome Shopee chưa sẵn sàng.")
@@ -53,16 +58,22 @@ func VerifyIntegration(ctx context.Context, s *platform.Store, b VerificationBro
 	}
 	shopID, _ := strconv.ParseUint(shop, 10, 64)
 	itemID, _ := strconv.ParseUint(item, 10, 64)
-	ids, err := tracking.Issue(tracking.Claims{CreatedAt: time.Now().UTC().Truncate(time.Second), Shop: shopID, Item: itemID, Policy: 1, Tier: "bronze", Bps: 6600}, "hxverify", cfg.Publisher, "0.63", s.SignTracking)
+	ids, err := s.Tracking.Issue(tracking.Claims{Customer: "00000000-0000-4000-8000-000000000001", Publisher: cfg.Publisher, CreatedAt: time.Now().UTC().Truncate(time.Second), Shop: shopID, Item: itemID, Policy: 1, EffectiveBps: 6300})
 	if err != nil {
 		return err
 	}
 	stage("tracking")
-	short, err := b.CreateOfferLink(ctx, shop, item, ids)
+	links, err := b.CreateCustomLinks(ctx, []browser.CustomLinkParam{{Shop: shop, Item: item, SubIDs: ids}})
 	if err != nil {
 		return checkError(err)
 	}
-	if short == "" {
+	if len(links) != 1 {
+		return checkError(errors.New("SHOPEE_RESPONSE_INVALID"))
+	}
+	if links[0].Err != nil {
+		return checkError(links[0].Err)
+	}
+	if links[0].URL == "" {
 		return platform.Fail(502, "SHOPEE_SUBID_REJECTED", "Shopee không chấp nhận định dạng tracking của link. Chưa tạo link hoàn Xu.")
 	}
 	return nil

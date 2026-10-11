@@ -7,7 +7,7 @@ Go/PostgreSQL API for Hoàn Xu. The frontend is at https://github.com/Tenzl/hoan
 Use the Go version declared in `go.mod`, PostgreSQL, and Chromium for Shopee product checks.
 
 1. Copy `.env.example` to `.env.local`, set `APP_ENV=development`, and configure a loopback PostgreSQL database, `MIGRATION_DATABASE_URL` and `APP_ORIGIN`.
-2. For a new empty database, generate `DATA_ENCRYPTION_KEY` with `go run ./cmd/admin key`. For a production clone, preserve the source encryption key to read historical data and verify tracking. Never commit it. Configure the same private 32-byte hex `PROXY_SIGNING_KEY` in frontend and backend `.env.local`.
+2. For a new empty database, generate `DATA_ENCRYPTION_KEY` with `go run ./cmd/admin key`. For a production clone, preserve the source encryption key to read historical data. Configure separate TRACKING_KEYS and TRACKING_ACTIVE_KEY_ID before generating tracking v4 links; see docs/tracking-v4.md. Never commit it. Configure the same private 32-byte hex `PROXY_SIGNING_KEY` in frontend and backend `.env.local`.
 3. Run `go run ./cmd/admin migrate` from this repository root. Migrations and SQL sources are included in `database/`.
 4. Run `go run ./cmd/api`. The local API listens on `127.0.0.1:8080`; set the frontend's `BACKEND_URL` accordingly.
 
@@ -54,41 +54,48 @@ Incoming attribution and tokens are discarded; new records store a canonical
 `https://shopee.vn/product/{shop}/{item}` URL. Shop links return
 `422 NOT_PRODUCT_LINK`; network failures and timeouts keep separate error codes.
 
-`POST /api/v1/affiliate-links` generates an official Shopee short link through
-`POST /api/v3/gql?q=productOfferLinks` (`batchGetProductOfferLink`) in a logged-in
-worker tab. It opens the product offer page and uses its native **Get Link →
-Advanced → Add to Link** flow so the Affiliate app supplies its own session and
-request headers. A bare fetch/XHR returned HTTP 200 with an upstream error instead
-of a link during live acceptance. The backend fills:
+`POST /api/v1/affiliate-links` accepts one product at a time on both customer
+screens. It calls the logged-in Shopee app's native `batchGetCustomLink` at
+`/api/v3/gql?q=batchCustomLink` with exactly one `linkParams` entry. The backend
+matches the product, all five encrypted tracking parts and the native short-link
+response before saving. There is no multi-link creation endpoint or plus button.
 
-- `subId1`: the customer's permanent `users.tracking_code`, created automatically
-  on the first Google account registration and retained on subsequent logins.
-- `subId2`: the fixed campaign label `hoanxu`.
-- `subId3`: a versioned signed-attribution token (36 bytes big endian, Base62 padded to 49 characters) carrying creation time, random nonce, shop/item IDs, archived policy version, tier and chosen rate.
-- `subId4`: the Shopee-safe chosen payout factor: `0p63` encodes `0.63`, `0p00` encodes zero and `1p00` encodes one. The API and cashback arithmetic use the decimal factor. Signatures bind the exact carrier string; decimal-point SubIDs are not accepted.
-- `subId5`: a 32-character hex HMAC binding the Affiliate ID and SubIDs 1–4. The signing key is domain-derived from `DATA_ENCRYPTION_KEY`.
+Tracking v4 compact encrypts customer UUID, Affiliate ID, shop/item, issuance
+time, policy version and the final payout coefficient using AES-256-GCM and a
+separate keyring. Five Base62 parts have position prefixes HX41–HX45. A typical
+fixture totals 108 characters (22/22/22/21/21); maximum supported field values
+need at most 29 per Sub ID. The adapter's 50-character guard is an application
+limit, not a verified official Shopee limit. `trackingCode` is the SHA-256 of
+the entire envelope. No legacy tracking format is accepted. See
+[wire format, keys and acceptance checklist](docs/tracking-v4.md).
 
-Session credentials stay in Chrome. The backend accepts only a GQL request matching the product and all five expected SubIDs, followed by its matching HTTPS `s.shopee.vn/<code>` response. An initial standard link is ignored. `POST /api/v1/affiliate-links` requires Idempotency-Key and stores the verified link plus its fixed snapshot; replay returns the same result. Creation never inserts an order or credits a wallet. Both creation screens disable copy/purchase at expiry, while the backend independently validates actual order placement time.
+Creation requires Idempotency-Key, a configured tracking key and verification
+bound to the current tracking format. Replays reuse the result; same-customer,
+same-product requests reuse an active saved link. Creation does not insert an
+order or credit a wallet. Public API structure is unchanged and does not expose
+the decrypted payload or tax.
 
-Signed links are saved for **120 hours (5 days)**. This is list retention, not a cashback deadline. New links return 201 and Location; requests for the same customer/product during retention return the existing link with reused=true and 200. Existing signed v1/v2/v3 metadata and financial snapshots remain verifiable; Order Time must be at or after tracking issuance, with no upper deadline imposed by saved-link retention.
+Saved links are physically deleted after 120 hours or by their owner; order and
+wallet history survive deletion. This retention period is derived metadata,
+not part of the encrypted payload or a purchase deadline. CSV attribution works
+without the saved link, including late reports and purchases after deletion.
 
-GET /api/v1/affiliate-links lists all saved links independently of order status, excluding signed links whose autoDeleteAt has passed. The separate customer pages are /saved-links, /orders/pending, /orders/approved and /orders/rejected; /orders redirects to pending. Order pages use GET /api/v1/orders?status=pending|approved|rejected and contain orders only. The former mixed /me/purchases API is deprecated.
+Original Shopee CSV must preserve all five tracking parts and complete source
+identifiers, product IDs and Order Time (Vietnam UTC+7). Validation checks the
+AEAD, customer, publisher, product and issuance time. Cashback uses only the
+verified final coefficient and the report commission, rounded up to whole Xu;
+it does not recalculate from current or archived policy rates/tax. Policy version
+resolves the audit reference only. Source identity and ledger uniqueness prevent
+double credits; approved orders remain immutable. Existing historical orders
+and balances are not rewritten. Generic legacy tracking cannot update orders.
 
-DELETE /api/v1/affiliate-links/{id} physically deletes the owned signed link (204), including links with pending/approved orders. Unknown or already deleted links return 404. The startup/minute worker physically deletes up to 200 overdue or previously hidden signed links per pass. Orders and wallet history are preserved; tracking is retained on orders before an existing link reference is detached by ON DELETE SET NULL. Legacy links remain read-only. Product and tracking locks serialize creation/deletion and order reconciliation. Apply migration **35** before starting this version (34 is the existing gift-image migration).
-
-Shopee CSV attribution verifies signed SubIDs independently of any saved-link record, including purchases after deletion or after five days. Signature, publisher, customer, product and archived-rate checks remain; duplicate imports never credit twice.
-
-Import the original Shopee CSV with full identifiers and a complete `Order Time` (Vietnam UTC+7). Required columns include `Order id`, `Conversion id`, `Order Status`, `Order Time`, `Shop id`, `Item id`, `Model id`, `Promotion id`, `Item Name`, `Purchase Value(₫)`, `Item Total Commission(₫)`, `Affiliate Item Status` and `Sub_id1–5`. Scientific-notation IDs, `########` and date-only timestamps are errors. Invalid signatures, unrelated campaigns/products and rows dated before tracking issuance are ignored with a preview reason. Pending real orders are recorded; cancellations are rejected with zero cashback; completed eligible rows await existing internal approval.
-
-Source identity is order/conversion/shop/item/model/promotion, independent of CSV row number. Re-imports update the same order and never credit a second time. Reports that change approved orders are ignored with a reason; approved orders and their wallet entries are immutable. Period membership and admin configuration are documented in [docs/cashback-tiers.md](docs/cashback-tiers.md). New orders store their signed tracking, validity interval and effective rate directly, with `link_id=NULL`. Manual order entry requires the same full source identifiers, signed SubIDs and actual order time.
-
-Historical links, orders and wallet balances are preserved. Legacy tracking can only update an existing historical order and cannot establish a new cashback order. Migration 12 adds stateless tracking metadata and stable numeric policy aliases; migration 13 adds the internal policy rate configuration; migration 14 adds saved metadata for new links and supports both token validity intervals. After testing in a separate `_test` database, migration 14 was applied to the configured shared Supabase `hoanxu` schema on 2026-10-07 (version 14, clean), and the new local backend was started. A private schema backup was taken first; before/after and post-restart record digests matched for all 6,752 historical links, 6,749 orders, 103 users and all wallet accounts, entries and transactions. Historical links retain null signed metadata and remain read-only. Wallet balance reconciliation and transaction balancing reported zero mismatches.
-
-Live native GQL acceptance passed on 2026-10-07 with the exact five SubIDs, including the 49-character token, `0p63` factor and 32-character signature, followed by a matching short-link response. This validates link generation; actual purchase attribution still requires an original Shopee report containing all five SubIDs.
+This format requires new real Shopee acceptance: confirm link generation and
+an original CSV returning all five exact Sub IDs before official activation.
+Earlier acceptance of plaintext/HMAC formats does not verify v4 compact.
 
 `CHROME_HEADLESS=false` opens Chromium for manual verification on a desktop. `true` runs it hidden. Shopee may still require manual access verification; successful desktop checks do not guarantee cloud/headless operation. No CAPTCHA or two-factor verification is automated.
 
-Product units were compared with ten Affiliate pages; sanitized evidence is in `tests/fixtures/affiliate/`. The default price scale is 100000, editable in the form's advanced settings. Verification normalizes actual product data and exercises native short-link GQL with a five-day token, `0p63`, and HMAC. It creates only an administrative verification record, with no customer link/order/wallet writes. Commission attribution is still established by original Shopee reports.
+Product units were compared with ten Affiliate pages; sanitized evidence is in `tests/fixtures/affiliate/`. The default price scale is 100000, editable in the form's advanced settings. Verification normalizes actual product data and exercises native short-link GQL with five encrypted v4 compact tracking parts. It creates only an administrative verification record, with no customer link/order/wallet writes. Commission attribution is still established by original Shopee reports.
 
 ## Validation and contract
 

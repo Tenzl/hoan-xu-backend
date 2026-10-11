@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"hoanxu/internal/affiliate"
+	"hoanxu/internal/browser"
 	"hoanxu/internal/platform"
 	"sync/atomic"
 	"testing"
@@ -16,14 +17,14 @@ type blockingOffer struct {
 	calls            atomic.Int32
 }
 
-func (f *blockingOffer) CreateOfferLink(ctx context.Context, _, _ string, _ [5]string) (string, error) {
+func (f *blockingOffer) CreateCustomLinks(ctx context.Context, _ []browser.CustomLinkParam) ([]browser.CustomLinkResult, error) {
 	f.calls.Add(1)
 	close(f.entered)
 	select {
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return nil, ctx.Err()
 	case <-f.release:
-		return "https://s.shopee.vn/test", nil
+		return []browser.CustomLinkResult{{URL: "https://s.shopee.vn/test"}}, nil
 	}
 }
 func TestLinkOperationSurvivesDisconnectReplaysAndRejectsConflict(t *testing.T) {

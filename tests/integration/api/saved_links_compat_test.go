@@ -10,46 +10,21 @@ import (
 	"time"
 )
 
-func TestHistoricalVersionsRetainMetadataWithoutBlockingAfterRetention(t *testing.T) {
+func TestCurrentTrackingMetadataSurvivesLinkRetention(t *testing.T) {
 	s, user, admin := testStore(t)
 	ctx := context.Background()
 	created := time.Now().UTC().Add(-30 * 24 * time.Hour).Truncate(time.Second)
 	_, row := savedFixture(t, s, user, created)
-	claims, e := tracking.Verify(row.SubIDs, row.Publisher, s.SignTracking)
-	if e != nil {
-		t.Fatal(e)
-	}
-	newer := row
-	claims.Version = 2
-	newer.SubIDs, e = tracking.Issue(claims, row.SubIDs[0], row.Publisher, "0.63", s.SignTracking)
-	if e != nil {
-		t.Fatal(e)
-	}
-	newer.Tracking = newer.SubIDs[2]
-	newer.OrderID = "NEWV2"
-	newer.LineID, _ = imports.SourceLineID(newer)
-	newer.Date = created.Add(6 * 24 * time.Hour)
-	claims.Version = 1
-	ids, e := tracking.Issue(claims, row.SubIDs[0], row.Publisher, "0.63", s.SignTracking)
-	if e != nil {
-		t.Fatal(e)
-	}
-	row.SubIDs = ids
-	row.Tracking = ids[2]
-	row.Date = created.Add(7*24*time.Hour - time.Second)
-	importRows(t, s, admin, []imports.Row{row, newer})
+	row.Date = created.Add(7 * 24 * time.Hour)
+	importRows(t, s, admin, []imports.Row{row})
 	var id string
-	var n int
 	var expiry time.Time
-	if e = s.Pool.QueryRow(ctx, `SELECT id::text,link_expires_at FROM orders WHERE tracking_code=$1`, row.Tracking).Scan(&id, &expiry); e != nil || !expiry.Equal(created.Add(7*24*time.Hour)) {
+	if e := s.Pool.QueryRow(ctx, `SELECT id::text,link_expires_at FROM orders WHERE tracking_code=$1`, row.Tracking).Scan(&id, &expiry); e != nil || !expiry.Equal(created.Add(tracking.Lifetime)) {
 		t.Fatal(expiry, e)
-	}
-	if e = s.Pool.QueryRow(ctx, `SELECT count(*) FROM orders`).Scan(&n); e != nil || n != 2 {
-		t.Fatal(n, e)
 	}
 	row.Status = "approved"
 	importRows(t, s, admin, []imports.Row{row})
-	if _, e = (&orders.Service{Store: s}).Event(ctx, admin, id, "legacy-signed-approve", orders.Event{Action: "approved"}); e != nil {
+	if _, e := (&orders.Service{Store: s}).Event(ctx, admin, id, "current-signed-approve", orders.Event{Action: "approved"}); e != nil {
 		t.Fatal(e)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -12,6 +11,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hoanxu/internal/tracking"
+	"os"
 	"strings"
 	"time"
 
@@ -30,10 +31,10 @@ func (e *Error) Error() string                    { return e.Message }
 func Fail(status int, code, message string) error { return &Error{status, code, message} }
 
 type Store struct {
-	Pool        *pgxpool.Pool
-	Cipher      cipher.AEAD
-	Queries     *db.Queries
-	trackingKey []byte
+	Pool     *pgxpool.Pool
+	Cipher   cipher.AEAD
+	Queries  *db.Queries
+	Tracking *tracking.Codec
 }
 
 func New(pool *pgxpool.Pool, key string) (*Store, error) {
@@ -46,20 +47,20 @@ func New(pool *pgxpool.Pool, key string) (*Store, error) {
 		return nil, e
 	}
 	a, e := cipher.NewGCM(block)
-	h := hmac.New(sha256.New, raw)
-	h.Write([]byte("hoanxu:cashback-link-signing:v1"))
-	return &Store{Pool: pool, Cipher: a, Queries: db.New(pool), trackingKey: h.Sum(nil)}, e
+	codec, err := tracking.NewCodec(os.Getenv("TRACKING_KEYS"), os.Getenv("TRACKING_ACTIVE_KEY_ID"))
+	if err != nil {
+		return nil, err
+	}
+	return &Store{Pool: pool, Cipher: a, Queries: db.New(pool), Tracking: codec}, e
 }
 
-// SignTracking binds the publisher and all four claims using an unambiguous encoding.
-func (s *Store) SignTracking(publisher string, ids [4]string) string {
-	b, _ := json.Marshal(struct {
-		Publisher string
-		SubIDs    [4]string
-	}{publisher, ids})
-	h := hmac.New(sha256.New, s.trackingKey)
-	h.Write(b)
-	return hex.EncodeToString(h.Sum(nil)[:16])
+// TrackingError preserves operational key failures across HTTP and import workers.
+func TrackingError(err error) error {
+	var missing *tracking.KeyError
+	if errors.As(err, &missing) {
+		return Fail(503, "TRACKING_KEY_UNAVAILABLE", "Thiếu khóa tracking. Cần cấu hình lại khóa và xử lý lại báo cáo.")
+	}
+	return err
 }
 func Token() string {
 	b := make([]byte, 32)

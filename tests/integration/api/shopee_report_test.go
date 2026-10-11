@@ -28,12 +28,12 @@ func signedReportFixture(t *testing.T, s *platform.Store, customer string) impor
 		t.Fatal(err)
 	}
 	created := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	claims := tracking.Claims{CreatedAt: created, Shop: 83496725, Item: 6939920023, Policy: version, Tier: "bronze", Bps: 6600}
-	ids, err := tracking.Issue(claims, code, "123456789", "0.63", s.SignTracking)
+	claims := tracking.Claims{CreatedAt: created, Shop: 83496725, Item: 6939920023, Policy: version}
+	ids, err := fixtureTracking(t, s, claims, customer)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return imports.Row{NativeShopee: true, Channel: "shopee", OrderID: "REPORT1", LineID: "report-line", Tracking: ids[2], SubIDs: ids, ShopID: "83496725", ItemID: "6939920023", Name: "Report product", Value: 463832, Commission: 20872, Status: "pending", Date: created.Add(time.Minute), ReportMetadata: imports.ReportMetadata{ReportChannel: "Zalo", ShopeeOrderStatus: "Pending", AffiliateItemStatus: "Pending", ReportedValue: "463832", ReportedCommission: "20872.44"}}
+	return imports.Row{NativeShopee: true, Channel: "shopee", OrderID: "REPORT1", LineID: "report-line", Tracking: fixtureCode(ids), SubIDs: ids, ShopID: "83496725", ItemID: "6939920023", Name: "Report product", Value: 463832, Commission: 20872, Status: "pending", Date: created.Add(time.Minute), ReportMetadata: imports.ReportMetadata{ReportChannel: "Zalo", ShopeeOrderStatus: "Pending", AffiliateItemStatus: "Pending", ReportedValue: "463832", ReportedCommission: "20872.44"}}
 }
 
 func TestShopeeReportApprovalCompetesWithManualReview(t *testing.T) {

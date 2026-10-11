@@ -7,7 +7,7 @@ loopback hoặc hệ số đơn vị giá (mặc định 100000). Chrome luôn c
 Lưu cấu hình trước, mở Chrome đăng nhập, kiểm tra phiên và nhập một link sản phẩm
 có hoa hồng để **Kiểm tra sản phẩm và tracking**. Tác vụ tối đa 90 giây kiểm tra
 phiên, dữ liệu sản phẩm và native GQL đủ năm Sub_id. Kết quả đúng cấu hình hiện
-hành mới cho phép bật **Cho phép khách tạo link**. Mã chẩn đoán `hxverify` không
+hành mới cho phép bật **Cho phép khách tạo link**. Tracking chẩn đoán dùng UUID hệ thống riêng, không
 thuộc khách Google, nên không dùng để ghi nhận hoàn Xu. Tạo link kiểm tra không
 lưu affiliate_links/orders/wallet; bảng riêng shopee_verifications lưu tiến độ.
 
@@ -26,6 +26,8 @@ status cũ trong bảng chỉ phục vụ tương thích lịch sử. Đổi Aff
 làm kết quả xác minh ở các origin khác mất hiệu lực. Backend kiểm tra lại cấu hình
 ở các thao tác Shopee để nhận thay đổi của origin khác. SSH/noVNC giữ env triển khai.
 
+Định dạng hiện tại là [tracking v4 compact](tracking-v4.md), cần khóa riêng và xác minh lại. Trước khi bật chính thức phải kiểm tra CSV Shopee thật trả đủ năm Sub ID nguyên vẹn; proof tạo link không xác nhận vòng CSV.
+
 ## Chuyển đổi
 
 1. Dừng backend và sao lưu schema hoanxu, file env hiện dùng cùng binary cũ trong
@@ -39,7 +41,7 @@ làm kết quả xác minh ở các origin khác mất hiệu lực. Backend ki�
    backend, dừng browser do backend quản lý rồi dùng:
    `admin verify-shopee-settings --product-url https://shopee.vn/product/83496725/6939920023`.
    Thêm `--enable` chỉ khi cần bật tạo link sau khi kiểm tra thật thành công.
-   Lệnh dùng cùng kiểm tra, chữ ký và proof như API; không ghi dữ liệu tài chính.
+   Lệnh dùng cùng kiểm tra, mã hóa và proof như API; không ghi dữ liệu tài chính.
 5. Bỏ SHOPEE_ENABLED/TRACKING_VERIFIED/SCHEMA_VERIFIED/PRICE_SCALE và
    BROWSER_MODE/CHROME_PATH/PROFILE/REMOTE_URL/HEADLESS khỏi env đã chuyển.
    Các biến này chỉ còn được đọc bởi lệnh nhập một lần, không dùng khi chạy API.
@@ -50,6 +52,8 @@ Rollback bằng binary và env đã sao lưu; giữ migration cộng thêm, khô
 Chỉ phục hồi cấu hình đã sao lưu khi cần; không restore toàn bộ schema lên dữ liệu
 mới của khách. Với Render, cấu hình origin production phải được nhập trước khi
 đưa bản API mới vào sử dụng. Chuyển cấu hình không tự deploy lên Render.
+
+Định dạng hiện tại là [tracking v4 compact](tracking-v4.md), cần khóa riêng và xác minh lại. Trước khi bật chính thức phải kiểm tra CSV Shopee thật trả đủ năm Sub ID nguyên vẹn; proof tạo link không xác nhận vòng CSV.
 
 ## Chuyển đổi local ngày 07/10/2026
 

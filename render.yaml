@@ -20,6 +20,10 @@ services:
         sync: false
       - key: DATA_ENCRYPTION_KEY
         sync: false
+      - key: TRACKING_KEYS
+        sync: false
+      - key: TRACKING_ACTIVE_KEY_ID
+        sync: false
       - key: APP_ORIGIN
         value: https://hoan-xu.vercel.app
       - key: COOKIE_SECURE

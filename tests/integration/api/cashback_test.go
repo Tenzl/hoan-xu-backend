@@ -61,10 +61,12 @@ func TestTierMigrationPreservesLegacyMoney(t *testing.T) {
 		t.Fatal(cash, balance, bps, minBps, maxBps, tier)
 	}
 	var tierCount int
- if e=s.Pool.QueryRow(ctx,`SELECT count(*) FROM cashback_tiers`).Scan(&tierCount);e!=nil||tierCount!=3{t.Fatal(tierCount,e)}
+	if e = s.Pool.QueryRow(ctx, `SELECT count(*) FROM cashback_tiers`).Scan(&tierCount); e != nil || tierCount != 3 {
+		t.Fatal(tierCount, e)
+	}
 }
 
-func TestLegacyOrderSnapshotSurvivesPolicyChangesAndRejectsAdjustment(t *testing.T) {
+func TestLegacyCSVDoesNotUpdateHistoricalSnapshot(t *testing.T) {
 	s, customer, admin := testStore(t)
 	ctx := context.Background()
 	policies := &cashback.Service{Store: s}
@@ -164,6 +166,10 @@ func TestLegacyOrderSnapshotSurvivesPolicyChangesAndRejectsAdjustment(t *testing
 		}
 	}
 	wait(batches)
+	var ignored int
+	if e = s.Pool.QueryRow(ctx, `SELECT count(*) FROM import_rows WHERE status='ignored'`).Scan(&ignored); e != nil || ignored != len(batches) {
+		t.Fatal("legacy tracking was not ignored", ignored, e)
+	}
 	var id string
 	var bps, count int
 	var cash int64
@@ -178,7 +184,7 @@ func TestLegacyOrderSnapshotSurvivesPolicyChangesAndRejectsAdjustment(t *testing
 	if e = s.Pool.QueryRow(ctx, `SELECT count(*) FROM orders WHERE publisher='fixture'`).Scan(&count); e != nil || count != 1 {
 		t.Fatal(count, e)
 	}
-	// A changed pending commission and a restarted worker retain the same draw.
+	// Even a restarted worker must ignore a changed legacy commission.
 	cancel()
 	wg.Wait()
 	workerCtx, cancel = context.WithCancel(ctx)
@@ -191,7 +197,7 @@ func TestLegacyOrderSnapshotSurvivesPolicyChangesAndRejectsAdjustment(t *testing
 	if e = s.Pool.QueryRow(ctx, `SELECT share_bps,cashback FROM orders WHERE id=$1`, id).Scan(&afterBps, &cash); e != nil {
 		t.Fatal(e)
 	}
-	expected, _ = cashback.Amount(20001, bps)
+	expected, _ = cashback.Amount(10001, bps)
 	if afterBps != bps || cash != expected {
 		t.Fatal(afterBps, cash)
 	}
@@ -220,7 +226,7 @@ func TestLegacyOrderSnapshotSurvivesPolicyChangesAndRejectsAdjustment(t *testing
 	if e = s.Pool.QueryRow(ctx, `SELECT balance FROM wallet_accounts WHERE user_id=$1 AND kind='available'`, customer).Scan(&balance); e != nil {
 		t.Fatal(e)
 	}
-	expected, _ = cashback.Amount(20001, bps)
+	expected, _ = cashback.Amount(10001, bps)
 	if balance != expected {
 		t.Fatal(balance, expected)
 	}
@@ -230,7 +236,7 @@ func TestLegacyOrderSnapshotSurvivesPolicyChangesAndRejectsAdjustment(t *testing
 	if e = s.Pool.QueryRow(ctx, `SELECT a.balance,o.share_bps FROM wallet_accounts a JOIN orders o ON o.user_id=a.user_id WHERE a.user_id=$1 AND a.kind='available' AND o.id=$2`, customer, id).Scan(&balance, &afterBps); e != nil {
 		t.Fatal(e)
 	}
-	expected, _ = cashback.Amount(20001, bps)
+	expected, _ = cashback.Amount(10001, bps)
 	if balance != expected || afterBps != bps {
 		t.Fatal(balance, afterBps)
 	}
